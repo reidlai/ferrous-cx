@@ -18,7 +18,7 @@
 1. **Frontend:** **Svelte 5** + **shadcn-svelte** in a 3-column layout featuring a **Transparent Agentic Workbench** and **Human-in-the-Loop (HITL)** approval workflows.
 2. **Reactive Bridge:** **RxJS** unidirectional data stream bridging SSE events to Svelte 5 Runes.
 3. **UI Architecture:** Strict **Atomic Design** hierarchy ensuring clean separation of presentation and business logic.
-4. **Backend Gateway & API Layer:** **Rust / Axum** Gateway driven by **Goa Design v3** contracts and `rust-axum` OpenAPI code generation, leveraging native **Axum SSE** for real-time browser synchronization and embedding in-process **Apache DataFusion** (<3ms SQL).
+4. **Backend API Service Layer:** **Rust / Axum** API Service driven by **Goa Design v3** contracts and `rust-axum` OpenAPI code generation, leveraging native **Axum SSE** for real-time browser synchronization and embedding in-process **Apache DataFusion** (<3ms SQL).
 5. **In-Memory Analytical Querying:** **Apache DataFusion** scanning **Delta Lake** Parquet tables in-process (<3ms query latency).
 6. **Traffic Simulation:** **`stream-replay-rs`** (Git submodule at project root), replaying historical Parquet/CSV datasets into **Apache Iggy** via its Kafka gateway with real-time timestamp shifting.
 7. **Flagship Scenario:** Brazilian E-Commerce dataset (**Olist**) for order tracking, shipment delay resolution, review analysis, and courtesy credits.
@@ -37,7 +37,7 @@
                             (1) POST /v1/chat/completions  │ (SSE Stream: Tokens, Tool Events)
                                                        │  │
                                ┌───────────────────────┴──┴─────────────────────────────┐
-                               │            FerrousCX Gateway (Rust / Axum)             │
+                               │          FerrousCX API Service (Rust / Axum)           │
                                │                                                        │
                                │  • OpenAI-Compatible SSE Streamer                      │
                                │  • LLM Orchestration via `rig` (Pure Rust)             │
@@ -76,28 +76,28 @@
 
 ```mermaid
 flowchart TD
-    Client["Frontend Client<br/>(Svelte 5 + shadcn-svelte)"] -->|POST /v1/chat/completions| Gateway["FerrousCX Gateway<br/>(Rust / Axum + Axum SSE)"]
-    Gateway -->|SSE Event Stream| Client
+    Client["Frontend Client<br/>(Svelte 5 + shadcn-svelte)"] -->|POST /v1/chat/completions| ApiService["FerrousCX API Service<br/>(Rust / Axum + Axum SSE)"]
+    ApiService -->|SSE Event Stream| Client
 
     subgraph Historical_Path ["Historical Streaming & Analytics Pipeline (Olist)"]
         Replayer["Traffic Replayer<br/>(stream-replay-rs)"] -->|1. Ingest Payload (Kafka 9092)| IggyStream[("Apache Iggy<br/>Topic: orders/intake")]
         IggyStream -->|2. Consume Stream Topics| Arroyo["Arroyo Engine<br/>(Stream Windowing & SQL DDL)"]
         Arroyo -->|3. 2PC Parquet Sinks| DeltaHist[("Delta Lake<br/>(Historical Parquet Sinks)")]
         DeltaHist -->|4. Vectorized SQL Scan &lt;3ms| DataFusion["Apache DataFusion<br/>(Analytical Query Engine)"]
-        Gateway -.->|Query Delta Lake (Historical Streaming Only)| DataFusion
+        ApiService -.->|Query Delta Lake (Historical Streaming Only)| DataFusion
     end
 
     subgraph CQRS_Path ["Transactional CQRS-ES Pipeline (Live Orders)"]
-        Gateway -->|5. Issue Command Mutation| CQRS["Command Handler & Aggregate<br/>(ferrous-cqrses)"]
+        ApiService -->|5. Issue Command Mutation| CQRS["Command Handler & Aggregate<br/>(ferrous-cqrses)"]
         CQRS <-->|6. Direct TCP Connection:<br/>Event Store WAL & Event Bus| IggyWAL[("Apache Iggy Broker<br/>(Event Store & Event Bus)")]
         IggyWAL -->|7. Event Bus Projections| Projector["State Projector<br/>(Live Read Model)"]
-        Projector -.->|Read Active Aggregate State| Gateway
+        Projector -.->|Read Active Aggregate State| ApiService
     end
 
     subgraph IAM_Layer ["Authentication & Access Control (Pure Rust)"]
         IAM[("Kanidm IdP Engine<br/>(ferrous-iam:8443)")]
         Client -.->|OIDC PKCE Login / Bearer JWT| IAM
-        Gateway -.->|Cached JWKS Signature Check| IAM
+        ApiService -.->|Cached JWKS Signature Check| IAM
     end
 ```
 
@@ -151,7 +151,7 @@ $$\text{Axum SSE Stream} \xrightarrow{\text{EventSource / Fetch}} \textbf{RxJS O
 
 ## ⚡ High-Performance Rust Stack
 
-* **API Gateway (`ferrous-api`):** **Rust / Axum** driven by **Goa Design v3** declarative contracts, compiling OpenAPI v3 specs into strongly typed Rust server traits via `rust-axum` and synchronizing live browser state via native **Axum SSE** (`axum::response::sse::Sse`).
+* **API Service (`ferrous-api`):** **Rust / Axum** driven by **Goa Design v3** declarative contracts, compiling OpenAPI v3 specs into strongly typed Rust server traits via `rust-axum` and synchronizing live browser state via native **Axum SSE** (`axum::response::sse::Sse`).
 * **LLM Orchestration:** **`rig` (`rig-core`)** for pure-Rust agent pipelines, prompt construction, native tool execution, and direct Hugging Face integration via `rig::providers::huggingface` (`huggingface::QWEN2_5`).
 * **Analytical Query Engine:** **Apache DataFusion** executing vectorized SQL scans in <3ms directly against Delta Lake Parquet tables, used **strictly for historical streaming datasets** (e.g. Olist historical transactions, reviews, delivery logs).
 * **Historical Lakehouse Storage:** **Delta Lake (`delta-lake-rs`)** receiving streaming 2PC Parquet commits from Arroyo for historical analytics.
@@ -238,7 +238,7 @@ ferrous-cx/ (This Repository - Public Root Architecture & Ecosystem Index)
 │
 ├── ferrous-cqrses/          # [Submodule 7] Dual-Role CQRS Library (lib.rs) & Command Handler Service ($20 Courtesy Credit Cap)
 │
-├── ferrous-api/             # [Submodule 8] Contract-First Axum API Gateway (Goa DSL, rust-axum, in-process DataFusion <3ms SQL, Axum SSE)
+├── ferrous-api/             # [Submodule 8] Contract-First Axum API Service (Goa DSL, rust-axum, in-process DataFusion <3ms SQL, Axum SSE)
 │
 ├── ferrous-agent/           # [Submodule 9] Pure-Rust Multi-Provider AI Engine (rig-core), Context Sanitizer & In-Process Benchmarks
 │
