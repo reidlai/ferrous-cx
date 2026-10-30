@@ -186,28 +186,42 @@ impl Tool for LakehouseOrderQueryTool {
 
 ## 🔄 Real-Time Traffic Simulation (`stream-replay-rs`)
 
-`stream-replay-rs` ([reidlai/stream-replay-rs](https://github.com/reidlai/stream-replay-rs)) simulates realistic real-time traffic for the streaming pipeline as an autonomous CLI utility and library crate.
+`stream-replay-rs` ([reidlai/stream-replay-rs](https://github.com/reidlai/stream-replay-rs)) simulates realistic real-time traffic for the streaming pipeline as an autonomous, high-throughput CLI utility and library crate.
 
 ### Key Capabilities
-* **Dual Format:** Usable as a standalone CLI tool (`cargo install`) and as a library crate dependency in other Rust services.
-* **Input Formats:** Ingests CSV or Parquet files (`--input-file-format parquet --input-file-path <path>`).
-* **Kafka Gateway Sink:** Streams simulated traffic directly into Apache Iggy's Kafka-compatible gateway (`--sink kafka --sink-url <iggy_kafka_url>`).
-* **Timestamp Time-Shifting:** `--shift-timestamps-to-now` recalculates historical timestamps relative to `chrono::Utc::now()` so streaming engines treat events as live.
-* **Rate & Speed Multipliers:** `--speed 1.0` (real-time replay), `--speed 10.0` (10x fast-forward), or `--rate 100` (fixed 100 events/sec).
+* **Dual Format:** Usable as a standalone CLI tool (`cargo install`) and as an embeddable library crate dependency in other Rust services.
+* **Dataset Agnostic:** Ingests CSV or Parquet files (`--input-file-format parquet --input-file-path <path>`) across arbitrary domains.
+* **Pluggable Multi-Sink Architecture:** Dispatches events to Apache Iggy / Kafka gateway (`--sink kafka`), NATS JetStream (`--sink nats`), Fluvio (`--sink fluvio`), Eclipse iceoryx2 zero-copy IPC (`--sink iceoryx2`), or terminal inspection (`--sink stdout`).
+* **Timestamp Time-Shifting:** Anchors historical event timestamps dynamically to the live wall-clock time (`chrono::Utc::now()`) maintaining precise inter-arrival pacing.
+* **Interactive Micro-Burst Testing:** Supports `--burst <N>` to instantly inject batches (e.g. `--burst 500` orders) without pacing delays in under 1 second (>500 msgs/s), validating queue backpressure and buffer stability in Apache Iggy and Arroyo.
 
 ---
 
-## 📊 Reference Datasets
+## 📊 Flagship Scenario & Playback Calibration
 
 ### 1. Olist Brazilian E-Commerce Dataset (Flagship for Release 1)
 * **Purpose:** Retail customer support, order fulfillment, shipping delay mitigation, and sentiment analysis.
 * **Schema:** Relational Parquet tables including `orders`, `order_items`, `customers`, `payments`, `reviews`, and `sellers`.
 * **Execution:** Queried in real-time by `rig` agents via `DataFusion`, with order events replayed live through `stream-replay-rs` into `Iggy` $\rightarrow$ `Arroyo` $\rightarrow$ `Delta Lake`.
 
-### 2. MultiWOZ (Multi-Domain Wizard-of-Oz)
+### 2. Calibrated 10x Default Playback Rationale
+* The flagship Brazilian Olist e-commerce dataset contains **100,000 orders** spanning **730 days** (1,051,200 minutes).
+* **Historical Baseline Arrival Rate**:
+  $$\text{Rate}_{\text{historical}} = \frac{100,000 \text{ orders}}{1,051,200 \text{ minutes}} \approx 0.095 \text{ orders/min}$$
+* **Calibrated 10x Acceleration**:
+  $$\text{Rate}_{\text{accelerated}} = 0.095 \times 10 \approx 0.95 \text{ orders/min} \approx \mathbf{1\text{ order/minute}}$$
+  Accelerated by **10x Speed**, the steady-state arrival rate is **~1 order/minute**, keeping platform intake queues actively populated during live human inspection and interactive operator workflows without overwhelming development machines.
+
+### 3. Monotonic Timestamp Advancement & Primary Key Salting
+* **Monotonic Time Shifting**:
+  $$\text{Timestamp}_{\text{emitted}} = \text{Timestamp}_{\text{record}} + \Delta_{\text{now}} + (\text{loop\_count} \times \Delta_{\text{dataset}})$$
+  Guarantees strictly increasing Arroyo watermarks with zero late-data drops or backward clock regressions across infinite looping simulations.
+* **Entity ID Salting**: Appends loop iteration markers (`_L1`, `_L2`) to entity primary keys (`order_id`) when `--loop-id-salt` is enabled, eliminating primary key deduplication collisions in downstream Delta Lake tables (`orders_raw_events`, `orders_current_state`).
+
+### 4. MultiWOZ (Multi-Domain Wizard-of-Oz)
 * **Purpose:** Multi-turn dialogue state tracking and cross-domain hotel, restaurant, and train bookings.
 
-### 3. Google Schema-Guided Dialogue (SGD)
+### 5. Google Schema-Guided Dialogue (SGD)
 * **Purpose:** API-driven state transitions and strict microservice schema validation across 20+ domains.
 
 ---
