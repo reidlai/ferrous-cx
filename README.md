@@ -186,12 +186,7 @@ impl Tool for LakehouseOrderQueryTool {
 
 ## 🔄 Real-Time Traffic Simulation (`stream-replay-rs`)
 
-`stream-replay-rs` simulates realistic real-time traffic for the streaming pipeline:
-
-```text
-ferrous-cx/
-├── stream-replay-rs/          # [Git Submodule] Rust crate & CLI binary
-```
+`stream-replay-rs` ([reidlai/stream-replay-rs](https://github.com/reidlai/stream-replay-rs)) simulates realistic real-time traffic for the streaming pipeline as an autonomous CLI utility and library crate.
 
 ### Key Capabilities
 * **Dual Format:** Usable as a standalone CLI tool (`cargo install`) and as a library crate dependency in other Rust services.
@@ -217,37 +212,47 @@ ferrous-cx/
 
 ---
 
-## 📁 Repository Architecture & Modular Submodules
+## 📁 Repository Architecture & Modular Submodule Ecosystem
 
-The **FerrousCX** platform is organized as a modular, single-responsibility Git submodule ecosystem:
+The **FerrousCX** public hub (`ferrous-cx`) maintains the authoritative architectural specifications, C4 diagrams, and ecosystem index.
+
+### 1. `ferrous-cx` Hub Repository Structure
 
 ```text
-ferrous-cx/ (This Repository - Public Root Architecture & Ecosystem Index)
+ferrous-cx/ (This Repository - Public Root Architecture Hub & Ecosystem Index)
 │
-├── ferrous-iam/             # [Submodule 1] Pure-Rust Identity & Access Management (Kanidm IdP, OIDC/OAuth2, 6 M2M Svc Accounts)
+├── docs/                        # Architecture deep-dives, C4 diagrams, and specifications
+│   ├── c4/                      # C4 model architecture diagrams (Context, Container, Component)
+│   ├── topologies/              # System topologies, streaming pipelines & IAM flows
+│   ├── datasets/                # Reference dataset specifications (Olist, MultiWOZ, SGD)
+│   └── security/                # Day-0 attack defense matrix, threat models & WAF policies
 │
-├── ferrous-lakehouse/       # [Submodule 2] Open Delta Lake ACID Storage Tier (orders_raw_events, orders_current_state, llm_benchmarks)
+├── scripts/                     # Ecosystem validation & documentation helper scripts
 │
-├── ferrous-streaming/       # [Submodule 3] Unified Streaming Stack (Apache Iggy Broker <1ms fsync + Arroyo 2PC Delta Lake Sinks)
-│
-├── stream-replay-rs/        # [Submodule 4] Standalone multi-sink traffic simulator with monotonic time shifting & 10x multiplier
-│
-├── ferrous-query-engine/    # [Submodule 5] Apache DataFusion Vectorized Analytical Query Engine & TableProvider Catalog
-│
-├── ferrous-vectordb/        # [Submodule 6] Qdrant vector database indexing enterprise SOPs & support transcripts
-│
-├── ferrous-cqrses/          # [Submodule 7] Dual-Role CQRS Library (lib.rs) & Command Handler Service ($20 Courtesy Credit Cap)
-│
-├── ferrous-api/             # [Submodule 8] Contract-First Axum API Service (Goa DSL, rust-axum, in-process DataFusion <3ms SQL, Axum SSE)
-│
-├── ferrous-agent/           # [Submodule 9] Pure-Rust Multi-Provider AI Engine (rig-core), Context Sanitizer & In-Process Benchmarks
-│
-├── ferrous-frontend/        # [Submodule 10] Svelte 5 + shadcn-svelte 3-column UI workbench (Screens 0–6)
-│
-├── ferrous-reverseproxy/    # [Submodule 11] Zentinel (Cloudflare Pingora) Edge Reverse Proxy, TLS 1.3 Termination & OWASP WAF
-│
-└── ferrous-docker/          # [Submodule 12] Unified 12-submodule Docker Compose runtime, 3-tier OTel & Ephemeral Jaeger UI
+├── LICENSE                      # Open-source license (MIT / Apache-2.0)
+└── README.md                    # Public ecosystem index, architecture overview & quickstart
 ```
+
+---
+
+### 2. Modular Submodule Ecosystem (12 Autonomous Repositories)
+
+The FerrousCX platform is partitioned into 12 single-responsibility Git repositories. Each submodule is completely decoupled, contains its own documentation, pre-commit validation, and container builds:
+
+| # | Submodule | Repository | Architectural Role | Tech Stack |
+| :-: | :--- | :--- | :--- | :--- |
+| **1** | **`ferrous-iam`** | [`reidlai/ferrous-iam`](https://github.com/reidlai/ferrous-iam) | Identity & Access Management (Kanidm IdP, OIDC/OAuth2, 6 M2M Svc Accounts) | Pure-Rust Kanidm / Docker |
+| **2** | **`ferrous-lakehouse`** | [`reidlai/ferrous-lakehouse`](https://github.com/reidlai/ferrous-lakehouse) | Open Delta Lake ACID Storage Tier (`orders_raw_events`, `orders_current_state`) | Delta Lake (`delta-rs`) / Arrow / Parquet |
+| **3** | **`ferrous-streaming`** | [`reidlai/ferrous-streaming`](https://github.com/reidlai/ferrous-streaming) | Streaming Stack (Apache Iggy Broker <1ms fsync + Arroyo 2PC Delta Lake Sinks) | Apache Iggy / Arroyo Engine / Rust |
+| **4** | **`stream-replay-rs`** | [`reidlai/stream-replay-rs`](https://github.com/reidlai/stream-replay-rs) | Standalone multi-sink traffic simulator with monotonic time shifting & 10x multiplier | Pure-Rust CLI & Library Crate |
+| **5** | **`ferrous-query-engine`** | [`reidlai/ferrous-query-engine`](https://github.com/reidlai/ferrous-query-engine) | Vectorized Analytical Query Engine & TableProvider Catalog | Apache DataFusion / Arrow Flight SQL |
+| **6** | **`ferrous-vectordb`** | [`reidlai/ferrous-vectordb`](https://github.com/reidlai/ferrous-vectordb) | Qdrant vector database indexing enterprise SOPs & support transcripts | Qdrant Vector DB / FastEmbed |
+| **7** | **`ferrous-cqrses`** | [`reidlai/ferrous-cqrses`](https://github.com/reidlai/ferrous-cqrses) | Dual-Role CQRS Library (`lib.rs`) & Command Handler Service ($20 Credit Cap) | Pure-Rust Library Crate & Service |
+| **8** | **`ferrous-api`** | [`reidlai/ferrous-api`](https://github.com/reidlai/ferrous-api) | Contract-First Axum API Service (Goa DSL, rust-axum, in-process DataFusion <3ms SQL, Axum SSE) | Goa v3 / Axum / DataFusion |
+| **9** | **`ferrous-agent`** | [`reidlai/ferrous-agent`](https://github.com/reidlai/ferrous-agent) | Pure-Rust Multi-Provider AI Engine (`rig-core`), Context Sanitizer & In-Process Benchmarks | `rig-core` / Context Sanitizer / PyO3 |
+| **10** | **`ferrous-frontend`** | [`reidlai/ferrous-frontend`](https://github.com/reidlai/ferrous-frontend) | Svelte 5 + shadcn-svelte 3-column UI workbench (Screens 0–6) | Svelte 5 / shadcn-svelte / RxJS / Tailwind |
+| **11** | **`ferrous-reverseproxy`** | [`reidlai/ferrous-reverseproxy`](https://github.com/reidlai/ferrous-reverseproxy) | Zentinel (Cloudflare Pingora) Edge Reverse Proxy, TLS 1.3 Termination & OWASP WAF | Pure-Rust Zentinel / Pingora / CRS |
+| **12** | **`ferrous-docker`** | [`reidlai/ferrous-docker`](https://github.com/reidlai/ferrous-docker) | Unified 12-submodule Docker Compose runtime, 3-tier OTel & Ephemeral Jaeger UI | Docker Compose / OTel / Jaeger |
 
 ---
 
@@ -258,38 +263,29 @@ ferrous-cx/ (This Repository - Public Root Architecture & Ecosystem Index)
 * **Node.js:** `20+` and `pnpm`
 * **Docker & Docker Compose:** For running the local containerized stack
 
-### 1. Clone the Ecosystem
+### Workflow Options
+
+#### Option A: Develop on a Standalone Submodule
+Each repository can be cloned and tested independently with zero monorepo coupling:
 ```bash
-git clone --recurse-submodules https://github.com/reidlai/ferrous-cx.git
-cd ferrous-cx
+git clone https://github.com/reidlai/ferrous-api.git
+cd ferrous-api
+cargo test
 ```
 
-### 2. Launch Local Infrastructure & Containers
+#### Option B: Boot the Full Containerized Platform via `ferrous-docker`
+To run the complete 12-submodule platform locally:
 ```bash
-# Start all services via the docker orchestration submodule
+git clone https://github.com/reidlai/ferrous-docker.git
 cd ferrous-docker
 docker compose up -d
-# Spins up: ferrous-iam (Kanidm), ferrous-lakehouse (Delta Lake), ferrous-streaming (Iggy + Arroyo), ferrous-vectordb (Qdrant), ferrous-api, etc.
+# Boots all 12 services with healthcheck graphs in <180s
 ```
 
-### 3. Run the Traffic Replayer
+#### Option C: Full Multi-Submodule Development Workspace (`ferrouscx-bmad`)
+For contributors working across multiple crates or submodules simultaneously:
 ```bash
-# Install and run stream-replay-rs to inject continuous Olist traffic into Iggy
-cargo install --path ./stream-replay-rs
-stream-replay-rs \
-  --input-file-format parquet \
-  --input-file-path ./data/olist_orders.parquet \
-  --sink kafka \
-  --sink-url localhost:9092 \
-  --advance-loop-timestamps \
-  --loop-id-salt \
-  --rate 25
-```
-
-### 4. Launch the Svelte 5 Frontend
-```bash
-cd ../ferrous-frontend
-pnpm install
-pnpm dev
-# Open http://localhost:5173 in your browser
+git clone --recurse-submodules https://github.com/reidlai/ferrouscx-bmad.git
+cd ferrouscx-bmad
+git submodule update --init --recursive
 ```
