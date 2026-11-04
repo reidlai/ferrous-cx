@@ -1,0 +1,42 @@
+# Topic registry (AD-27). The single source for topic addressing across the platform.
+#
+# Components read {stream, topic} from here and never concatenate or hardcode names.
+# `kafka_name` is the one string Kafka clients (Arroyo, the replayer) use for a topic,
+# because Kafka topic names cannot contain "/". The rule is: stream + "." + topic.
+# The Iggy-Kafka bridge map (ferrous-streaming/config/bridge/topic-map.toml) is generated
+# from this file by ferrous-streaming/scripts/generate-bridge-topic-map.py; never edit it by hand.
+#
+# `kafka.consume` lists the Kafka consumer groups allowed to read the topic.
+# `kafka.produce` says whether a Kafka producer (the replayer) may publish to it.
+# Benchmark topics are added by Story 3.11.
+version: 1
+topics:
+  - stream: orders
+    topic: intake
+    kafka_name: orders.intake
+    partitions: 4
+    retention: none          # no expiry: EARLIEST offset is always 0 through the bridge (Contract Sheet, section 2)
+    durability: replicated
+    kafka:
+      consume: [cg-arroyo-raw]
+      produce: false
+
+  - stream: orders
+    topic: consolidated
+    kafka_name: orders.consolidated
+    partitions: 4
+    retention: none
+    durability: replicated
+    kafka:
+      consume: [cg-arroyo-state]
+      produce: false
+
+  - stream: olist
+    topic: orders_stream
+    kafka_name: olist.orders_stream
+    partitions: 4            # [ASSUMPTION: Olist Partitions] match the orders topics until Story 3.10 sets it
+    retention: none
+    durability: persisted    # an acknowledged produce must mean "on stable storage" (Contract Sheet, section 10)
+    kafka:
+      consume: [cg-arroyo-olist]
+      produce: true
