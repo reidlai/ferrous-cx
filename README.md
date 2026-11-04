@@ -4,7 +4,9 @@
 
 [![Public Architecture Hub](https://img.shields.io/badge/hub-Public%20Root%20Architecture-blue.svg)](https://github.com/reidlai/ferrous-cx)
 [![Architecture Standard: Pure Rust + Svelte 5](https://img.shields.io/badge/stack-Pure%20Rust%20%2B%20Svelte%205-orange.svg)](https://github.com/reidlai/ferrous-cx)
-[![Submodules: 13 Repositories](https://img.shields.io/badge/submodules-13%20Git%20Repositories-purple.svg)](#-repository-architecture--modular-submodules)
+[![Components: 9 Repositories](https://img.shields.io/badge/components-9%20Git%20Repositories-purple.svg)](#2-component-repositories-nine-autonomous-repositories)
+[![Runtime: Docker Compose](https://img.shields.io/badge/orchestration-Docker%20Compose%20v2.29+-blue.svg)](https://docs.docker.com/compose/)
+[![Telemetry: OpenTelemetry](https://img.shields.io/badge/telemetry-OpenTelemetry%20%2B%20Jaeger-orange.svg)](https://opentelemetry.io/)
 [![License: MIT / Apache-2.0](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-green.svg)](LICENSE)
 
 **FerrousCX** is an enterprise-grade, event-driven conversational AI and customer experience platform built on a high-performance **Rust-native stack**, integrating modern web copilot interfaces with an ultra-low-latency lakehouse architecture.
@@ -233,7 +235,9 @@ The **FerrousCX** public hub (`ferrous-cx`) maintains the authoritative architec
 ### 1. `ferrous-cx` Hub Repository Structure
 
 ```text
-ferrous-cx/ (This Repository - Public Root Architecture Hub & Ecosystem Index)
+ferrous-cx/ (This Repository - Core Public Repository: demo config, runtime stack, docs, component submodules)
+│
+├── docker/                      # Compose stack, OTel tiers, smoke tests (absorbed from the former ferrous-docker)
 │
 ├── docs/                        # Architecture deep-dives, C4 diagrams, and specifications
 │   ├── c4/                      # C4 model architecture diagrams (Context, Container, Component)
@@ -249,24 +253,63 @@ ferrous-cx/ (This Repository - Public Root Architecture Hub & Ecosystem Index)
 
 ---
 
-### 2. Modular Submodule Ecosystem (12 Autonomous Repositories)
+### 2. Component Repositories (Nine Autonomous Repositories)
 
-The FerrousCX platform is partitioned into 12 single-responsibility Git repositories. Each submodule is completely decoupled, contains its own documentation, pre-commit validation, and container builds:
+`ferrous-cx` aggregates nine single-responsibility Git repositories as submodules. Each component is decoupled, contains its own documentation, pre-commit validation, and container builds. Dependencies point one way: a component must never include `ferrous-cx`, or a repository that contains it, as a submodule (components may link to `ferrous-cx` in their README).
 
-| # | Submodule | Repository | Architectural Role | Tech Stack |
+| # | Component | Repository | Architectural Role | Tech Stack |
 | :-: | :--- | :--- | :--- | :--- |
-| **1** | **`ferrous-iam`** | [`reidlai/ferrous-iam`](https://github.com/reidlai/ferrous-iam) | Identity & Access Management (Kanidm IdP, OIDC/OAuth2, 6 M2M Svc Accounts) | Pure-Rust Kanidm / Docker |
-| **2** | **`ferrous-lakehouse`** | [`reidlai/ferrous-lakehouse`](https://github.com/reidlai/ferrous-lakehouse) | Open Delta Lake ACID Storage Tier (`orders_raw_events`, `orders_current_state`) | Delta Lake (`delta-rs`) / Arrow / Parquet |
-| **3** | **`ferrous-streaming`** | [`reidlai/ferrous-streaming`](https://github.com/reidlai/ferrous-streaming) | Streaming Stack (Apache Iggy Broker <1ms fsync + Arroyo 2PC Delta Lake Sinks) | Apache Iggy / Arroyo Engine / Rust |
-| **4** | **`stream-replay-rs`** | [`reidlai/stream-replay-rs`](https://github.com/reidlai/stream-replay-rs) | Standalone multi-sink traffic simulator with monotonic time shifting & 10x multiplier | Pure-Rust CLI & Library Crate |
-| **5** | **`ferrous-query-engine`** | [`reidlai/ferrous-query-engine`](https://github.com/reidlai/ferrous-query-engine) | Vectorized Analytical Query Engine & TableProvider Catalog | Apache DataFusion / Arrow Flight SQL |
-| **6** | **`ferrous-vectordb`** | [`reidlai/ferrous-vectordb`](https://github.com/reidlai/ferrous-vectordb) | Qdrant vector database indexing enterprise SOPs & support transcripts | Qdrant Vector DB / FastEmbed |
-| **7** | **`ferrous-cqrses`** | [`reidlai/ferrous-cqrses`](https://github.com/reidlai/ferrous-cqrses) | Dual-Role CQRS Library (`lib.rs`) & Command Handler Service ($20 Credit Cap) | Pure-Rust Library Crate & Service |
-| **8** | **`ferrous-api`** | [`reidlai/ferrous-api`](https://github.com/reidlai/ferrous-api) | Contract-First Axum API Service (Goa DSL, rust-axum, in-process DataFusion <3ms SQL, Axum SSE) | Goa v3 / Axum / DataFusion |
-| **9** | **`ferrous-agent`** | [`reidlai/ferrous-agent`](https://github.com/reidlai/ferrous-agent) | Pure-Rust Multi-Provider AI Engine (`rig-core`), Context Sanitizer & In-Process Benchmarks | `rig-core` / Context Sanitizer / PyO3 |
-| **10** | **`ferrous-frontend`** | [`reidlai/ferrous-frontend`](https://github.com/reidlai/ferrous-frontend) | Svelte 5 + shadcn-svelte 3-column UI workbench (Screens 0–6) | Svelte 5 / shadcn-svelte / RxJS / Tailwind |
-| **11** | **`ferrous-reverseproxy`** | [`reidlai/ferrous-reverseproxy`](https://github.com/reidlai/ferrous-reverseproxy) | Zentinel (Cloudflare Pingora) Edge Reverse Proxy, TLS 1.3 Termination & OWASP WAF | Pure-Rust Zentinel / Pingora / CRS |
-| **12** | **`ferrous-docker`** | [`reidlai/ferrous-docker`](https://github.com/reidlai/ferrous-docker) | Unified 12-submodule Docker Compose runtime, 3-tier OTel & Ephemeral Jaeger UI | Docker Compose / OTel / Jaeger |
+| **1** | **`ferrous-streaming`** | [`reidlai/ferrous-streaming`](https://github.com/reidlai/ferrous-streaming) | Consolidated data platform in one compose service: Apache Iggy (<1ms fsync, Kafka gateway), Arroyo 2PC Delta sinks, the Delta store (`orders_raw_events`, `orders_current_state`, `olist_*`, `llm_benchmarks`) and a DataFusion query service; also carries the public benchmark | Apache Iggy / Arroyo / Delta Lake (`delta-rs`) / DataFusion |
+| **2** | **`stream-replay-rs`** | [`reidlai/stream-replay-rs`](https://github.com/reidlai/stream-replay-rs) | Independent, dataset-agnostic multi-sink traffic replayer with timestamp rebasing and speed control | Pure-Rust CLI & Library Crate |
+| **3** | **`ferrous-iam`** | [`reidlai/ferrous-iam`](https://github.com/reidlai/ferrous-iam) | Identity & Access Management for human RBAC and the API (Kanidm IdP, OIDC/OAuth2, residual M2M accounts `svc_ferrous_api` and `svc_ferrous_agent`) | Pure-Rust Kanidm / Docker |
+| **4** | **`ferrous-vectordb`** | [`reidlai/ferrous-vectordb`](https://github.com/reidlai/ferrous-vectordb) | Qdrant vector database indexing enterprise SOPs & support transcripts | Qdrant Vector DB / FastEmbed |
+| **5** | **`ferrous-cqrses`** | [`reidlai/ferrous-cqrses`](https://github.com/reidlai/ferrous-cqrses) | Dual-Role CQRS Library (`lib.rs`) & Command Handler Service ($20 Credit Cap) | Pure-Rust Library Crate & Service |
+| **6** | **`ferrous-api`** | [`reidlai/ferrous-api`](https://github.com/reidlai/ferrous-api) | Contract-First Axum API Service (Goa DSL, rust-axum, in-process DataFusion <3ms SQL, Axum SSE) | Goa v3 / Axum / DataFusion |
+| **7** | **`ferrous-agent`** | [`reidlai/ferrous-agent`](https://github.com/reidlai/ferrous-agent) | Pure-Rust Multi-Provider AI Engine (`rig-core`), Context Sanitizer & In-Process Benchmarks | `rig-core` / Context Sanitizer |
+| **8** | **`ferrous-frontend`** | [`reidlai/ferrous-frontend`](https://github.com/reidlai/ferrous-frontend) | Svelte 5 + shadcn-svelte 3-column UI workbench, including the read-only Replay Monitor | Svelte 5 / shadcn-svelte / RxJS / Tailwind |
+| **9** | **`ferrous-reverseproxy`** | [`reidlai/ferrous-reverseproxy`](https://github.com/reidlai/ferrous-reverseproxy) | Zentinel (Cloudflare Pingora) Edge Reverse Proxy, TLS 1.3 Termination & OWASP WAF | Pure-Rust Zentinel / Pingora / CRS |
+
+The former `ferrous-lakehouse` and `ferrous-query-engine` repositories are consolidated into `ferrous-streaming`, and the former `ferrous-docker` repository is merged into this repository (see below).
+
+---
+
+## 🐳 Runtime Orchestration & OpenTelemetry (formerly `ferrous-docker`)
+
+`ferrous-cx` provides the unified integration and developer runtime harness for the platform. This section carries over the former `ferrous-docker` README, updated for the consolidated topology.
+
+1. **Zero-Daemon Local Development:** Launch the platform with a single `docker compose up -d`, requiring zero external host dependencies.
+2. **Explicit Healthcheck Dependency Graph:** Startup is gated with `condition: service_healthy`. Iggy (`ferrous-streaming`) and Qdrant boot first, then storage consumers, `ferrous-cqrses`, the API gateway, reverse proxy and frontend. `ferrous-iam` gates only `ferrous-api`, `ferrous-agent` and `ferrous-frontend`; the data platform does not depend on it.
+3. **3-Tier OpenTelemetry Developer Runtime** (unrelated to the Tier 1 / Tier 2 CI repository tiers):
+   - **Tier 1 (Disabled):** `OTEL_SDK_DISABLED=true` (zero span overhead, clean stdout).
+   - **Tier 2 (Console):** `OTEL_TRACES_EXPORTER=console` (human-readable trace logs in the terminal).
+   - **Tier 3 (OTLP Egress):** Ephemeral in-memory Jaeger All-In-One (`jaegertracing/all-in-one:latest`) on ports 4317/4318 with the Web UI on 16686.
+4. **Pre-Commit DevSecOps Automation:** Hooks verify secret leakage (`gitleaks`), Dockerfile hygiene (`hadolint`) and vulnerability scanning (`trivy`) across the component repositories.
+5. **Platform Smoke Validation:** Scripted end-to-end checks (`smoke-test.sh` / `smoke-test.ps1`) over the multi-service lifecycle.
+
+### Runtime Topology
+
+Ports for `ferrous-cqrses`, `ferrous-agent` and `ferrous-frontend` are carried over from the former `ferrous-docker` README and differ from the PRD addendum (agent `8081`, frontend `5173`); the architecture update fixes the final assignment.
+
+| Component | Container service | Primary ports | Healthcheck probe |
+| :--- | :--- | :---: | :--- |
+| `ferrous-iam` | `kanidmd` | `8443`, `3636` | `kanidmd healthcheck` |
+| `ferrous-streaming` | one service: Iggy, Arroyo, Delta store, DataFusion | Iggy `3000` (HTTP), `8090` (TCP), `9092` (Kafka gateway); Arroyo `5115`; DataFusion `50051` (Flight SQL), `8085` (HTTP) | Iggy ping, Arroyo health, `SELECT 1` |
+| `stream-replay-rs` | on-demand CLI job (not a long-running service) | n/a | n/a |
+| `ferrous-vectordb` | `qdrant` | `6333`, `6334` | `GET /readyz` HTTP 200 |
+| `ferrous-cqrses` | `command-handler` | `8081` | Socket / partition liveness |
+| `ferrous-api` | `axum-gateway` | `8080` | `GET /health/ready` HTTP 200 |
+| `ferrous-agent` | `agent-service` | `8082` | `GET /health` HTTP 200 |
+| `ferrous-frontend` | `web-studio` | `3000` | `GET /healthz` HTTP 200 |
+| `ferrous-reverseproxy` | `zentinel` | `80`, `443` | TLS port 443 handshake |
+| `ferrous-cx` | `jaeger` (ephemeral) | `16686`, `4317`, `4318` | `GET /` HTTP 200 |
+
+> [!NOTE]
+> Port `3000` is claimed by both the Iggy HTTP API (`ferrous-streaming`) and `web-studio` in this carried-over table. Resolve the collision in the architecture update before the compose file is written.
+
+### DevSecOps & Smoke Testing
+
+- Pre-commit hooks run `hadolint` and `trivy` on the Dockerfiles of every component repository.
+- All containers run as non-root users with read-only root filesystems where applicable.
 
 ---
 
@@ -287,19 +330,150 @@ cd ferrous-api
 cargo test
 ```
 
-#### Option B: Boot the Full Containerized Platform via `ferrous-docker`
-To run the complete 12-submodule platform locally:
+#### Option B: Boot the Full Containerized Platform from `ferrous-cx`
+To run the complete platform locally, clone this repository with its component submodules and start the compose stack:
 ```bash
-git clone https://github.com/reidlai/ferrous-docker.git
-cd ferrous-docker
+git clone --recurse-submodules https://github.com/reidlai/ferrous-cx.git
+cd ferrous-cx
 docker compose up -d
-# Boots all 12 services with healthcheck graphs in <180s
+# Target: all services green through healthcheck gating in <180s
+docker compose ps                      # real-time status and health
+open http://localhost:16686            # distributed traces in Jaeger (Tier 3)
+./scripts/smoke-test.sh                # end-to-end platform smoke test
 ```
 
-#### Option C: Full Multi-Submodule Development Workspace (`ferrouscx-bmad`)
-For contributors working across multiple crates or submodules simultaneously:
+> [!WARNING]
+> The compose file, configuration and smoke-test scripts are **not yet in this repository**. The former `ferrous-docker` repository held only its README, so these artifacts are still to be built here (compose stack under `docker/`, scripts under `scripts/`). The commands above are the target interface.
+
+#### Option C: Full Multi-Component Development Workspace (`ferrouscx-bmad`)
+For contributors working on the BMAD planning artifacts and the components together:
 ```bash
 git clone --recurse-submodules https://github.com/reidlai/ferrouscx-bmad.git
 cd ferrouscx-bmad
 git submodule update --init --recursive
+```
+
+---
+
+## 🚀 Local Demo Stack: Provision Services & Run `stream-replay-rs`
+
+This walk-through is carried over from the former `ferrous-docker` README and adapted to the consolidated platform. It describes how to bring the stack up and drive it with the `stream-replay-rs` CLI for a local demo or manual testing. Paths assume the compose stack lives under `docker/` in this repository; run every command from the `ferrous-cx` checkout root.
+
+### Prerequisites
+
+| Tool | Version | Used for |
+| :--- | :--- | :--- |
+| Docker + Compose | `v2.29+` | Building images and running the stack |
+| Rust | `1.80+` | Installing `stream-replay-rs` (`cargo install stream-replay-rs`, or `cargo install --git https://github.com/reidlai/stream-replay-rs` until the crate is published) |
+| `openssl` | any | Generating Kanidm dev TLS certificates (bundled with Git for Windows) |
+| Python | `3.9+` | `ferrous-streaming` provisioning scripts |
+
+Make sure the submodules are checked out (`git submodule update --init --recursive`).
+
+> [!IMPORTANT]
+> **Shells.** On macOS / Linux use the `bash` blocks as written. On Windows use **Git Bash** for the `bash` blocks, or **PowerShell** for the `powershell` blocks. `cmd.exe` can only run `.bat` launchers, not the Bash or PowerShell blocks.
+>
+> Stop any other FerrousCX stack first (`docker compose down` in `ferrous-streaming`, or `stream-replay-rs/docker-compose.dev.yml`). They reuse ports `3000`, `8090` and `9092` and the container names `ferrous-iggy-broker` / `ferrous-arroyo-streaming`.
+
+### 1. Build the Local Images
+
+The compose file references images that are **not published to a registry**, so build them locally:
+
+```bash
+docker build -t ferrous-iam:latest ferrous-iam
+(cd ferrous-streaming && ./scripts/build-and-scan.sh --skip-scan)   # PowerShell: .\scripts\build-and-scan.ps1 -SkipScan
+```
+
+`build-and-scan` builds the Iggy and Arroyo images of `ferrous-streaming`. Drop `--skip-scan` to also run the Trivy vulnerability gate.
+
+### 2. Generate Dev TLS Certificates
+
+Kanidm will not boot without TLS material. Generate self-signed certs and place them where the compose file mounts them (`docker/config/certs/chain.pem` and `key.pem`):
+
+```bash
+./ferrous-iam/scripts/generate-dev-certs.sh      # Windows: powershell -ExecutionPolicy Bypass -File ferrous-iam/scripts/generate-dev-certs.ps1
+mkdir -p docker/config/certs
+cp ferrous-iam/config/certs/chain.pem ferrous-iam/config/certs/key.pem docker/config/certs/
+```
+
+### 3. Create `docker/.env`
+
+Iggy signs its admin JWTs with a shared secret that defaults to **empty** when unset, and the provisioning scripts in step 5 must use the same secret as the broker. Generate a random secret and set `IGGY_HTTP_JWT_ENCODING_SECRET` and `IGGY_HTTP_JWT_DECODING_SECRET` to the same value (HS256 requires identical secrets). `.env` holds secrets, so keep it out of Git. The data platform authenticates with Iggy's native credentials, not Kanidm.
+
+### 4. Start the Stack
+
+```bash
+cd docker
+docker compose up -d
+docker compose ps        # wait until ferrous-iam, iggy and arroyo report "healthy"
+cd ..
+```
+
+| Service | Endpoint |
+| :--- | :--- |
+| Kanidm (IAM) | `https://localhost:8443` (self-signed cert), LDAPS `3636` |
+| Apache Iggy HTTP | `http://localhost:3000/ping` |
+| Apache Iggy native TCP | `localhost:8090` |
+| Kafka gateway | `localhost:9092` (**not served** by Iggy 0.9.0, see the warning below) |
+| Arroyo console | `http://localhost:5115` |
+| DataFusion (Flight SQL / HTTP) | `localhost:50051` / `localhost:8085` |
+
+### 5. Provision Topics and Pipelines
+
+`ferrous-cx` owns the FerrousCX topic setup. Load the same Iggy secret that is in `docker/.env`, then run the `ferrous-streaming` provisioners to create stream `orders` with topics `intake` and `consolidated` and the consumer groups, then deploy the Arroyo pipelines:
+
+```bash
+export IGGY_HTTP_JWT_ENCODING_SECRET=$(grep '^IGGY_HTTP_JWT_ENCODING_SECRET=' docker/.env | cut -d= -f2-)
+cd ferrous-streaming
+./scripts/provision-topics.sh
+./scripts/provision-consumer-groups.sh
+./scripts/provision-arroyo.sh
+./scripts/run-migrations.sh
+cd ..
+```
+
+PowerShell users run the `.ps1` twin of each script after setting `$env:IGGY_HTTP_JWT_ENCODING_SECRET`. The scripts are idempotent. The consolidation adds the replay topic `olist/orders_stream` and Arroyo Job 3 (`cg-arroyo-olist`) to this set; those scripts are still to be written.
+
+> [!WARNING]
+> **Known state against the Iggy 0.9.0 image the stack builds** (`Dockerfile.iggy` pulls `apache/iggy:latest`, which is not pinned):
+> - `provision-topics` and `provision-consumer-groups` work only with the `ferrous-streaming` fixes that change the admin token's user id from `1` to `0` (Iggy 0.9.0 treats `1` as an unknown user and answers `403`), add the now-required `compression_algorithm` / `max_topic_size` topic fields, base64-encode the partition id, and address streams and topics by name. Without those fixes they stop at `403 unauthorized`.
+> - `provision-arroyo` and `run-migrations` do **not** work: Arroyo reads from Iggy through a Kafka connector on port `9092`, and Iggy 0.9.0 does not serve one.
+> - The `ferrous-streaming` unit tests use mock brokers written for the older API, so they report additional failures after those fixes.
+
+### 6. Run `stream-replay-rs`
+
+```bash
+cargo install stream-replay-rs   # or: cargo install --git https://github.com/reidlai/stream-replay-rs
+
+# Smoke test with no broker involved
+stream-replay-rs --input-file-path data/olist_orders.parquet --sink stdout --speed 10x --progress
+
+# Point at the Iggy Kafka gateway from the stack (demo profile: 10x)
+stream-replay-rs --input-file-path data/olist_orders.parquet \
+  --sink kafka --sink-url localhost:9092 --topic olist/orders_stream --speed 10x --progress
+```
+
+Micro-burst and looping variants are in the [`stream-replay-rs` README](https://github.com/reidlai/stream-replay-rs).
+
+> [!WARNING]
+> **No Kafka endpoint exists, and the `kafka` sink is a stub.** Port `9092` is published by Docker but nothing in the Iggy 0.9.0 container listens on it. In the `stream-replay-rs` revision last checked, the Kafka sink only opens a TCP connection and counts offsets locally; it does not write records to the wire, so **no events will appear in Iggy, Arroyo or Delta Lake**. See `stream-replay-rs/src/sink/kafka.rs` before treating the demo as end-to-end.
+
+### 7. Check the Stack
+
+```bash
+curl http://localhost:3000/ping            # Iggy: "pong"  (PowerShell: use curl.exe)
+curl http://localhost:5115/api/v1/ping     # Arroyo health
+# Arroyo pipelines UI: http://localhost:5115/pipelines
+```
+
+> [!NOTE]
+> In the earlier four-container stack, Arroyo wrote Delta output to a host bind mount while the lakehouse initializer used a different named volume, so the initializer's tables were not the files Arroyo wrote to. With the Delta store inside `ferrous-streaming` the stack should use one shared location; confirm this when the compose file is written.
+
+### 8. Stop and Reset
+
+```bash
+cd docker
+docker compose down            # stop, keep data
+docker compose down -v         # also delete the named volumes
+# Iggy, Arroyo and Delta state live under docker/data/{iggy,arroyo,delta}; delete those folders for a clean slate
 ```
