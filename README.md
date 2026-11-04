@@ -155,8 +155,8 @@ $$\text{Axum SSE Stream} \xrightarrow{\text{EventSource / Fetch}} \textbf{RxJS O
 
 * **API Service (`ferrous-api`):** **Rust / Axum** driven by **Goa Design v3** declarative contracts, compiling OpenAPI v3 specs into strongly typed Rust server traits via `rust-axum` and synchronizing live browser state via native **Axum SSE** (`axum::response::sse::Sse`).
 * **LLM Orchestration:** **`rig` (`rig-core`)** for pure-Rust agent pipelines, prompt construction, native tool execution, and direct Hugging Face integration via `rig::providers::huggingface` (`huggingface::QWEN2_5`).
-* **Analytical Query Engine:** **Apache DataFusion** executing vectorized SQL scans in <3ms directly against Delta Lake Parquet tables, used **strictly for historical streaming datasets** (e.g. Olist historical transactions, reviews, delivery logs).
-* **Historical Lakehouse Storage:** **Delta Lake (`delta-lake-rs`)** receiving streaming 2PC Parquet commits from Arroyo for historical analytics.
+* **Analytical Query Engine:** **Apache DataFusion** executing vectorized SQL scans in <3ms directly against Delta Lake Parquet tables, used **strictly for historical streaming datasets** (e.g. Olist historical transactions, reviews, delivery logs). It runs embedded in `ferrous-api`, and as a standalone Flight SQL / HTTP service in `ferrous-streaming` for consumers other than the API.
+* **Historical Delta Store:** **Delta Lake (the `deltalake` crate)** inside `ferrous-streaming` (`store/`), receiving streaming 2PC Parquet commits from Arroyo for historical analytics.
 * **CQRS-ES Engine (`ferrous-cqrses`):** Pure-Rust domain command handlers enforcing business invariants ($20 credit cap), managing aggregate rehydration, and publishing domain events to Apache Iggy Event Store WAL & Event Bus, cleanly decoupled from the historical lakehouse.
 * **Message Broker:** **Apache Iggy** for ultra-high throughput event and conversation telemetry streaming.
 * **Stream Processing:** **Arroyo** for stateful stream transformations, windowing computations, and session metrics.
@@ -188,14 +188,13 @@ impl Tool for LakehouseOrderQueryTool {
 
 ## 🔄 Real-Time Traffic Simulation (`stream-replay-rs`)
 
-`stream-replay-rs` ([reidlai/stream-replay-rs](https://github.com/reidlai/stream-replay-rs)) simulates realistic real-time traffic for the streaming pipeline as an autonomous, high-throughput CLI utility and library crate.
+`stream-replay-rs` ([reidlai/stream-replay-rs](https://github.com/reidlai/stream-replay-rs)) is the **generic, independent** replayer used by this repository to turn the Olist dataset into live traffic. It knows nothing about FerrousCX: the dataset, the replay profiles and the topics (`olist/orders_stream`) belong to `ferrous-cx`. It is never controlled from the UI, the API or the agent.
 
 ### Key Capabilities
 * **Dual Format:** Usable as a standalone CLI tool (`cargo install`) and as an embeddable library crate dependency in other Rust services.
-* **Dataset Agnostic:** Ingests CSV or Parquet files (`--input-file-format parquet --input-file-path <path>`) across arbitrary domains.
-* **Pluggable Multi-Sink Architecture:** Dispatches events to Apache Iggy / Kafka gateway (`--sink kafka`), NATS JetStream (`--sink nats`), Fluvio (`--sink fluvio`), Eclipse iceoryx2 zero-copy IPC (`--sink iceoryx2`), or terminal inspection (`--sink stdout`).
-* **Timestamp Time-Shifting:** Anchors historical event timestamps dynamically to the live wall-clock time (`chrono::Utc::now()`) maintaining precise inter-arrival pacing.
-* **Interactive Micro-Burst Testing:** Supports `--burst <N>` to instantly inject batches (e.g. `--burst 500` orders) without pacing delays in under 1 second (>500 msgs/s), validating queue backpressure and buffer stability in Apache Iggy and Arroyo.
+* **Dataset Agnostic:** Ingests CSV, Parquet or JSONL files (`--input-file-format parquet --input-file-path <path>`) across arbitrary domains.
+* **Pluggable Multi-Sink Architecture:** Dispatches events to a Kafka-protocol endpoint such as the Apache Iggy gateway (`--sink kafka`), NATS JetStream (`--sink nats`), Fluvio (`--sink fluvio`), Eclipse iceoryx2 zero-copy IPC (`--sink iceoryx2`), or terminal inspection (`--sink stdout`).
+* **Timestamp Rebasing and Speed:** Rebases historical event timestamps onto the live clock and paces them by `--speed` (default `1.0`, original spacing) or by a fixed `--rate` in events per second. The two are mutually exclusive.
 
 ---
 
@@ -206,17 +205,20 @@ impl Tool for LakehouseOrderQueryTool {
 * **Schema:** Relational Parquet tables including `orders`, `order_items`, `customers`, `payments`, `reviews`, and `sellers`.
 * **Execution:** Queried in real-time by `rig` agents via `DataFusion`, with order events replayed live through `stream-replay-rs` into `Iggy` $\rightarrow$ `Arroyo` $\rightarrow$ `Delta Lake`.
 
-### 2. Calibrated 10x Default Playback Rationale
+### 2. Replay Profiles: Demo (10x) and Load (`--rate 25`)
+`ferrous-cx` ships two replay profiles for `olist/orders_stream`. The replayer itself defaults to speed `1.0`; the profile sets the speed.
+
 * The flagship Brazilian Olist e-commerce dataset contains **100,000 orders** spanning **730 days** (1,051,200 minutes).
 * **Historical Baseline Arrival Rate**:
   $$\text{Rate}_{\text{historical}} = \frac{100,000 \text{ orders}}{1,051,200 \text{ minutes}} \approx 0.095 \text{ orders/min}$$
-* **Calibrated 10x Acceleration**:
+* **Demo profile (`--speed 10x`)**:
   $$\text{Rate}_{\text{accelerated}} = 0.095 \times 10 \approx 0.95 \text{ orders/min} \approx \mathbf{1\text{ order/minute}}$$
-  Accelerated by **10x Speed**, the steady-state arrival rate is **~1 order/minute**, keeping platform intake queues actively populated during live human inspection and interactive operator workflows without overwhelming development machines.
+  At **10x**, the steady-state arrival rate is **~1 order/minute**, keeping platform intake queues actively populated during live human inspection and interactive operator workflows without overwhelming development machines.
+* **Load profile (`--rate 25`)**: a fixed 25 events per second, ignoring the dataset's own spacing. It drives the SM-3 stability run (more than two hours, long enough for at least one dataset loop with `--loop-id-salt`) and the platform's HPC benchmark.
 
 ### 3. Monotonic Timestamp Advancement & Primary Key Salting
 * **Monotonic Time Shifting**:
-  $$\text{Timestamp}_{\text{emitted}} = \text{Timestamp}_{\text{record}} + \Delta_{\text{now}} + (\text{loop\_count} \times \Delta_{\text{dataset}})$$
+  $$\text{Timestamp}_{\text{emitted}} = \text{Timestamp}_{\text{start}} + \frac{(\text{Timestamp}_{\text{record}} - \text{Timestamp}_{\text{first}}) + \text{loop\_count} \times \Delta_{\text{dataset}}}{\text{speed}}$$
   Guarantees strictly increasing Arroyo watermarks with zero late-data drops or backward clock regressions across infinite looping simulations.
 * **Entity ID Salting**: Appends loop iteration markers (`_L1`, `_L2`) to entity primary keys (`order_id`) when `--loop-id-salt` is enabled, eliminating primary key deduplication collisions in downstream Delta Lake tables (`orders_raw_events`, `orders_current_state`).
 
@@ -453,7 +455,7 @@ stream-replay-rs --input-file-path data/olist_orders.parquet \
   --sink kafka --sink-url localhost:9092 --topic olist/orders_stream --speed 10x --progress
 ```
 
-Micro-burst and looping variants are in the [`stream-replay-rs` README](https://github.com/reidlai/stream-replay-rs).
+Looping, fixed-rate and timestamp options are in the [`stream-replay-rs` README](https://github.com/reidlai/stream-replay-rs). For the load profile, replace `--speed 10x` with `--rate 25 --loop --advance-loop-timestamps --loop-id-salt`.
 
 > [!WARNING]
 > **No Kafka endpoint exists, and the `kafka` sink is a stub.** Port `9092` is published by Docker but nothing in the Iggy 0.9.0 container listens on it. In the `stream-replay-rs` revision last checked, the Kafka sink only opens a TCP connection and counts offsets locally; it does not write records to the wire, so **no events will appear in Iggy, Arroyo or Delta Lake**. See `stream-replay-rs/src/sink/kafka.rs` before treating the demo as end-to-end.
