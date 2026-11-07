@@ -40,3 +40,13 @@ topics:
     kafka:
       consume: [cg-arroyo-olist]
       produce: true
+
+  - stream: benchmark
+    topic: hpc_mqbench
+    kafka_name: benchmark.hpc_mqbench
+    partitions: 4
+    retention: none
+    durability: persisted
+    kafka:
+      consume: [cg-arroyo-benchmark]
+      produce: true
