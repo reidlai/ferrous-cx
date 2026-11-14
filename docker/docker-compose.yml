@@ -1,0 +1,285 @@
+# ==============================================================================
+# FerrousCX Master Topology Docker Compose Manifest (Story 12.1, AD-26, AD-24)
+# Orchestrates all 10 component services with strict Day-0 container hardening
+# ==============================================================================
+
+name: ferrous-cx
+
+include:
+  - path: ../../ferrous-streaming/docker-compose.yml
+
+services:
+  # 1. Identity & Access Management (Kanidm Pure-Rust IdP)
+  ferrous-iam:
+    build:
+      context: ../../ferrous-iam
+      dockerfile: Dockerfile
+    image: ferrous-iam:latest
+    container_name: ferrous-iam
+    user: "10001:10001"
+    restart: unless-stopped
+    ports:
+      - "${PORT_IAM:-8443}:8443"
+      - "3636:3636"
+    volumes:
+      - ../../ferrous-iam/config/server.toml:/etc/kanidm/server.toml:ro
+      - ../../ferrous-iam/config/certs:/etc/kanidm/certs:ro
+      - kanidm_data:/data
+    environment:
+      - KANIDM_CONFIG_PATH=/etc/kanidm/server.toml
+    healthcheck:
+      test: ["CMD", "/sbin/kanidmd", "version"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  # 2. Vector Database (Qdrant Vector Engine)
+  vectordb:
+    build:
+      context: ../../ferrous-vectordb
+      dockerfile: Dockerfile
+    image: ferrous-vectordb:latest
+    container_name: ferrous-vectordb
+    user: "10001:10001"
+    restart: unless-stopped
+    ports:
+      - "${PORT_VECTORDB:-6333}:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+      - ../../ferrous-vectordb/config/config.yaml:/qdrant/config/config.yaml:ro
+    environment:
+      - QDRANT__STORAGE__STORAGE_PATH=/qdrant/storage
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  # 3. CQRS-ES Command Handler & Aggregate Root (Day-0 Defense)
+  command-handler:
+    build:
+      context: ../../ferrous-cqrses
+      dockerfile: Dockerfile.command_handler
+    image: ferrous-cqrses-command-handler:latest
+    container_name: ferrous-cqrses-command-handler
+    user: "10001:10001"
+    restart: unless-stopped
+    # Day-0 Hardened Runtime Defense Constraints (AD-24)
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev,size=64M
+    environment:
+      - IGGY_SERVER_ADDRESS=${IGGY_SERVER_ADDRESS:-iggy-broker:8090}
+      - IGGY_USERNAME=${IGGY_USERNAME:-iggy}
+      - IGGY_PASSWORD=${IGGY_PASSWORD:-iggy}
+      - STREAM_NAME=orders
+      - TOPIC_ORDERS_INTAKE=intake
+      - TOPIC_ORDERS_CONSOLIDATED=consolidated
+      - CONSUMER_GROUP=cg-cmd-handler
+    depends_on:
+      iggy-broker:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/command_handler", "--healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # 4. API Service Gateway (Axum + Axum SSE + Embedded DataFusion)
+  ferrous-api:
+    build:
+      context: ../..
+      dockerfile: ferrous-api/Dockerfile
+    image: ferrous-api:latest
+    container_name: ferrous-api
+    user: "10001:10001"
+    restart: unless-stopped
+    # Day-0 Hardened Runtime Defense Constraints (AD-24)
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev,size=64M
+    ports:
+      - "${PORT_API:-8080}:8080"
+    volumes:
+      - ../../ferrous-streaming/data/delta:/data/delta:ro
+    environment:
+      - PORT=8080
+      - IGGY_SERVER_ADDRESS=${IGGY_SERVER_ADDRESS:-iggy-broker:8090}
+      - KANIDM_JWT_SECRET=${KANIDM_JWT_SECRET:-development_kanidm_jwt_secret_32_bytes_minimum!}
+      - KANIDM_ISSUER=${KANIDM_ISSUER:-https://iam.ferrouscx.local/oauth2/openid/svc_ferrous_api}
+      - DELTA_DATA_DIR=/data/delta
+      - DELTA_ORDERS_PATH=/data/delta/orders_current_state
+      - RUST_LOG=info
+    depends_on:
+      iggy-broker:
+        condition: service_healthy
+      ferrous-iam:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/ferrous-api", "--healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # 5. Autonomous AI Engine & Copilot Benchmarking (Rig-core)
+  ferrous-agent:
+    build:
+      context: ../../ferrous-agent
+      dockerfile: Dockerfile
+    image: ferrous-agent:latest
+    container_name: ferrous-agent
+    user: "10001:10001"
+    restart: unless-stopped
+    # Day-0 Hardened Runtime Defense Constraints (AD-24)
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev,size=64M
+      - /delta:noexec,nosuid,nodev,size=128M
+    ports:
+      - "${PORT_AGENT:-8081}:8081"
+    environment:
+      - PORT=8081
+      - RUST_LOG=info
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      - LLM_MODEL=${LLM_MODEL:-qwen2.5:7b}
+      - LLM_API_BASE=${LLM_API_BASE:-http://host.docker.internal:11434}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - HF_TOKEN=${HF_TOKEN:-}
+      - QDRANT_URL=http://vectordb:6333
+      - FERROUS_API_URL=http://ferrous-api:8080
+      - OTEL_SDK_DISABLED=${OTEL_SDK_DISABLED:-true}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4317}
+    depends_on:
+      ferrous-api:
+        condition: service_healthy
+      vectordb:
+        condition: service_healthy
+      ferrous-iam:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/ferrous-agent", "--healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # 6. Svelte 5 Web Operator Studio & Pure-Rust Static Server
+  ferrous-frontend:
+    build:
+      context: ../../ferrous-frontend
+      dockerfile: Dockerfile
+    image: ferrous-frontend:latest
+    container_name: ferrous-frontend
+    user: "10001:10001"
+    restart: unless-stopped
+    # Day-0 Hardened Runtime Defense Constraints (AD-24)
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev,size=64M
+    ports:
+      - "${PORT_FRONTEND:-5173}:5173"
+    environment:
+      - PORT=5173
+      - STATIC_DIR=/app/build
+    depends_on:
+      ferrous-api:
+        condition: service_healthy
+      ferrous-iam:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/server", "--healthcheck", "--port", "5173"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  # 7. Edge Reverse Proxy, TLS Termination & OWASP WAF (Zentinel / Hyper)
+  ferrous-reverseproxy:
+    build:
+      context: ../../ferrous-reverseproxy
+      dockerfile: Dockerfile
+    image: ferrous-reverseproxy:latest
+    container_name: ferrous-reverseproxy
+    user: "10001:10001"
+    restart: unless-stopped
+    # Day-0 Hardened Runtime Defense Constraints (AD-24)
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev,size=64M
+    ports:
+      - "${PORT_HTTP:-80}:80"
+      - "${PORT_HTTPS:-443}:443"
+    volumes:
+      - ../../ferrous-reverseproxy/config:/etc/zentinel:ro
+    depends_on:
+      ferrous-frontend:
+        condition: service_healthy
+      ferrous-api:
+        condition: service_healthy
+      ferrous-iam:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/ferrous-reverseproxy", "--healthcheck", "--health-port", "443"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # 8. Iggy-Kafka Bridge Overrides (AD-29 pinned image tag)
+  bridge:
+    image: ${BRIDGE_IMAGE:-iggy-kafka-bridge:0f8d788}
+
+  bridge-host:
+    image: ${BRIDGE_IMAGE:-iggy-kafka-bridge:0f8d788}
+
+volumes:
+  kanidm_data:
+    name: ferrous_kanidm_data
+  qdrant_storage:
+    name: ferrous_qdrant_storage
+
+networks:
+  default:
+    name: ferrous-net
