@@ -37,3 +37,10 @@ repos:
         language: system
         files: (docker-compose.*\.ya?ml|\.env\.example)$
         pass_filenames: false
+
+      - id: validate-quickstart
+        name: Quickstart, Registry & Replay Profile Gate
+        entry: bash scripts/validate-quickstart.sh
+        language: system
+        files: (contracts/topics\.ya?ml|profiles/.*\.toml|docs/quickstart\.md|docs/datasets/olist/.*)$
+        pass_filenames: false

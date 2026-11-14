@@ -38,7 +38,7 @@ $trivyCmd = if (Get-Command trivy -ErrorAction SilentlyContinue) { "trivy" } els
 if (-not $trivyCmd) {
     Write-Host "  [INFO] Trivy CLI not installed locally. Verifying manifest base image security pins..." -ForegroundColor Yellow
     $composeText = Get-Content "$ProjectRoot/docker/docker-compose.yml" -Raw
-    
+
     # Assert pinned versions on external images
     if (Test-Path "$ProjectRoot/../ferrous-iam/Dockerfile") {
         $iamDockerfile = Get-Content "$ProjectRoot/../ferrous-iam/Dockerfile" -Raw

@@ -86,7 +86,7 @@ for entry in "${ENDPOINTS[@]}"; do
     START_TIME=$(date +%s)
     ELAPSED=0
     HTTP_CODE="000"
-    
+
     while true; do
         HTTP_CODE=$(curl -k -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 3 "$url" 2>/dev/null || echo "000")
         for code in $codes; do
@@ -97,7 +97,7 @@ for entry in "${ENDPOINTS[@]}"; do
                 break 2
             fi
         done
-        
+
         NOW=$(date +%s)
         ELAPSED=$((NOW - START_TIME))
         if [ "$ELAPSED" -ge "$TIMEOUT_SECONDS" ]; then
@@ -105,7 +105,7 @@ for entry in "${ENDPOINTS[@]}"; do
         fi
         sleep 0.5
     done
-    
+
     if [ "$SUCCESS" = "true" ]; then
         echo "  [OK] ${name} responded HTTP ${HTTP_CODE} in ${ELAPSED}s"
     else
