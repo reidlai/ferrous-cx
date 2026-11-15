@@ -14,7 +14,7 @@ FerrousCX unites ten decoupled services into a deterministic, Day-0 hardened con
 
 ---
 
-## 2. Step 1: Booting the Master Topology
+## 2. Step 1: Generating Dev TLS Certificates & Booting Master Topology
 
 Ensure Docker Compose v2.20+ is installed and Docker Desktop is running.
 
@@ -25,6 +25,10 @@ cd ferrous-cx
 
 # Copy environment configuration
 cp .env.example .env
+
+# Generate self-signed Dev TLS certificates for Kanidm into config/iam/certs/ (pure Rust rcgen, zero OpenSSL requirement)
+cargo run --bin setup-iam -- --generate-certs
+# Note: Use --force (cargo run --bin setup-iam -- --generate-certs --force) to regenerate/overwrite existing certs
 
 # Boot all services in background
 docker compose up -d
@@ -43,23 +47,30 @@ All 8 service probes should return `[OK]` within 15 seconds.
 
 ---
 
-## 3. Step 2: Provisioning Streams, Topics & Consumer Groups
+## 3. Step 2: Provisioning Streams, Topics, Consumer Groups & IAM Personas
 
-Run the automated topic provisioner to initialize the Apache Iggy streams and consumer groups declared in `contracts/topics.yml`:
+Run the automated Cargo provisioners to initialize Apache Iggy streams, consumer groups declared in `contracts/topics.yml`, and IAM personas in `config/iam/`:
 
 ```bash
-# Linux/macOS
-./scripts/setup-topics.sh
+# Cross-Platform (Cargo)
+cargo run --bin setup-topics -- --dry-run   # Conformance audit
+cargo run --bin setup-topics               # Live topic provisioning
 
-# Windows PowerShell
-.\scripts\setup-topics.ps1
+cargo run --bin setup-iam -- --dry-run      # IAM persona & M2M audit
+cargo run --bin setup-iam                  # Idempotent IAM setup
+
+# Optional shell wrappers:
+# Linux/macOS:        ./scripts/setup-topics.sh && ./scripts/setup-iam.sh
+# Windows PowerShell: .\scripts\setup-topics.ps1; .\scripts\setup-iam.ps1
 ```
 
 The provisioner idempotently creates:
 - **Stream `orders`:** Topics `orders/intake` and `orders/consolidated` (4 partitions, replicated durability).
 - **Stream `olist`:** Topic `olist/orders_stream` (4 partitions, persisted durability).
 - **Stream `benchmark`:** Topic `benchmark/hpc_mqbench` (4 partitions, persisted durability).
-- **Consumer Groups:** Native group `cg-cmd-handler` on `orders/intake`, plus bridge consumer groups `cg-arroyo-raw`, `cg-arroyo-state`, `cg-arroyo-olist`, and `cg-arroyo-benchmark`.
+- **Consumer Groups:** Bridge consumer groups declared in the contract: `cg-arroyo-raw`, `cg-arroyo-state`, `cg-arroyo-olist`, and `cg-arroyo-benchmark`.
+- **Human RBAC Personas (`config/iam/seed-rbac.json`):** `customer_specialist` (`carlos.support`), `operations_manager` (`operations.lead`), and `system_admin` (`admin.sec`), plus OAuth2 client `ferrouscx-frontend`.
+- **M2M Service Accounts (`config/iam/seed-m2m.json`):** `svc_ferrous_api` (API Gateway) and `svc_ferrous_agent` (Autonomous Resolution Agent).
 
 ---
 
@@ -99,7 +110,7 @@ stream-replay-rs --config profiles/olist-demo.toml
 
 ---
 
-### 4.2 Load Profile (Sustained Stress Testing)
+### 4.3 Load Profile (Sustained Stress Testing)
 
 To evaluate backpressure, Arroyo windowing, and Delta Lake ACID commit durability under load:
 

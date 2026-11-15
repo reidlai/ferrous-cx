@@ -23,7 +23,7 @@ services:
       - "3636:3636"
     volumes:
       - ../../ferrous-iam/config/server.toml:/etc/kanidm/server.toml:ro
-      - ../../ferrous-iam/config/certs:/etc/kanidm/certs:ro
+      - ../config/iam/certs:/etc/kanidm/certs:ro
       - kanidm_data:/data
     environment:
       - KANIDM_CONFIG_PATH=/etc/kanidm/server.toml

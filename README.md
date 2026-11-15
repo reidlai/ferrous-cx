@@ -29,78 +29,54 @@
 
 ## 🏛️ System Architecture Topology
 
-```text
-                               ┌────────────────────────────────────────────────────────┐
-                               │                    FRONTEND CLIENT                     │
-                               │  Svelte 5 + shadcn-svelte (3-Column Atomic Layout)     │
-                               │  [ Left Menu ]  [ Middle Canvas ]  [ Right Sidecar ]   │
-                               └───────────────────────▲────────────────────────────────┘
-                                                       │  ▲
-                            (1) POST /v1/chat/completions  │ (SSE Stream: Tokens, Tool Events)
-                                                       │  │
-                               ┌───────────────────────┴──┴─────────────────────────────┐
-                               │          FerrousCX API Service (Rust / Axum)           │
-                               │                                                        │
-                               │  • OpenAI-Compatible SSE Streamer                      │
-                               │  • LLM Orchestration via `rig` (Pure Rust)             │
-                               │  • Native Hugging Face (`rig::providers::huggingface`) │
-                               │  • Provider Adapter (HF Qwen2.5, OpenRouter, Gemini)   │
-                               └──────────────┬───────────────────────────┬─────────────┘
-                                              │                           │
-                   Query Historical Lakehouse │                           │ (A) Issue Live Commands
-                   (Only for Historical       │                           │     POST /api/v1/commands
-                    Streaming Datasets)       │                           │
-                                              ▼                           ▼
-┌─────────────────┐                                                       ┌─────────────────┐
-│ Apache          │                                                       │ ferrous-cqrses  │
-│ DataFusion      │                                                       │ Command Handler │
-│ Query Engine    │                                                       │ & Aggregate Root│
-└────────▲────────┘                                                       └────────┬────────┘
-         │                                                                         │
-         │ Vectorized SQL (<3ms)                                                   │ Direct TCP Connection:
-         │ scans Parquet tables                                                    │ Event Store WAL (<1ms)
-         │ (Historical Only)                                                       │ & Event Bus Pub/Sub
-         ▼                                                                         ▼
-┌─────────────────┐  (3) 2PC Micro-Batch  ┌─────────────────┐  (2) Consume Topic  ┌─────────────────┐
-│ Delta Lake      │ ◄──────────────────── │ Arroyo Engine   │ ◄────────────────── │ Apache Iggy     │
-│ (Historical     │      Parquet Sinks    │ (Stream State & │     Historical      │ Message Broker  │
-│  Parquet Store) │                       │  Windowing SQL) │     Stream Topics   │ (WAL / Queues)  │
-└─────────────────┘                       └─────────────────┘                     └────────▲────────┘
-                                                                                           │
-                                                                                           │ (1) Ingest Payload Stream
-                                                                                           │     (Kafka Gateway 9092)
-                                                                                  ┌────────┴────────┐
-                                                                                  │ stream-replay-rs│
-                                                                                  │ (Traffic Replay │
-                                                                                  │  CLI & Library) │
-                                                                                  └─────────────────┘
-```
+The end-to-end dataflow across FerrousCX unites historical lakehouse analytics, high-throughput event replay, sub-millisecond CQRS-ES transaction processing, and pure-Rust identity management:
 
 ```mermaid
 flowchart TD
-    Client["Frontend Client<br/>(Svelte 5 + shadcn-svelte)"] -->|POST /v1/chat/completions| ApiService["FerrousCX API Service<br/>(Rust / Axum + Axum SSE)"]
-    ApiService -->|SSE Event Stream| Client
+    Client["Frontend Client<br/>(Svelte 5 + shadcn-svelte)"] -->|"POST /v1/chat/completions"| ApiService["FerrousCX API Service<br/>(Rust / Axum + Axum SSE)"]
+    ApiService -->|"SSE Event Stream"| Client
 
-    subgraph Historical_Path ["Historical Streaming & Analytics Pipeline (Olist)"]
-        Replayer["Traffic Replayer<br/>(stream-replay-rs)"] -->|1. Ingest Payload (Kafka 9092)| IggyStream[("Apache Iggy<br/>Topic: orders/intake")]
-        IggyStream -->|2. Consume Stream Topics| Arroyo["Arroyo Engine<br/>(Stream Windowing & SQL DDL)"]
-        Arroyo -->|3. 2PC Parquet Sinks| DeltaHist[("Delta Lake<br/>(Historical Parquet Sinks)")]
-        DeltaHist -->|4. Vectorized SQL Scan &lt;3ms| DataFusion["Apache DataFusion<br/>(Analytical Query Engine)"]
-        ApiService -.->|Query Delta Lake (Historical Streaming Only)| DataFusion
+    subgraph Ingestion_Source ["External Traffic Replayer"]
+        Replayer["Traffic Replayer<br/>(stream-replay-rs)"]
+    end
+
+    subgraph Streaming_Tier ["Historical Streaming & Analytics Pipeline (ferrous-streaming)"]
+        Iggy["Apache Iggy Broker<br/>• Port 8090 (Native TCP)<br/>• Port 3000 (HTTP)"]
+        Bridge["iggy-kafka-bridge<br/>• Port 9092 (Kafka wire protocol)"]
+
+        subgraph Arroyo_Engine ["Arroyo Processing Engine"]
+            Migrations["Schema Migrations<br/>(v1 → v2 DDL Evolution)"]
+            SQLPipeline["Arroyo SQL Streaming Jobs<br/>(Stream-to-Parquet Batcher)"]
+        end
+
+        Bridge -->|"2. Consume Stream Topics (Kafka Protocol: bridge:9092)"| SQLPipeline
+        Migrations -->|"DDL Evolution"| SQLPipeline
+
+        DeltaLake[("Delta Lake (2PC ACID Storage)<br/>• orders_raw_events (Audit Log)<br/>• orders_current_state (State Projection)")]
+        SQLPipeline -->|"3. 2PC Micro-Batches & State Projections"| DeltaLake
+
+        DataFusion["Apache DataFusion (query-service)<br/>• Port 50051 (Arrow Flight SQL)<br/>• Port 8085 (HTTP REST)"]
+        DeltaLake -->|"4. Vectorized SQL Scan (sub-3ms)"| DataFusion
     end
 
     subgraph CQRS_Path ["Transactional CQRS-ES Pipeline (Live Orders)"]
-        ApiService -->|5. Issue Command Mutation| CQRS["Command Handler & Aggregate<br/>(ferrous-cqrses)"]
-        CQRS <-->|6. Direct TCP Connection:<br/>Event Store WAL & Event Bus| IggyWAL[("Apache Iggy Broker<br/>(Event Store & Event Bus)")]
-        IggyWAL -->|7. Event Bus Projections| Projector["State Projector<br/>(Live Read Model)"]
-        Projector -.->|Read Active Aggregate State| ApiService
+        CQRS["Command Handler & Aggregate<br/>(ferrous-cqrses)"]
+        CQRS <-->|"6. Direct TCP Connection:<br/>Event Store WAL & Event Bus"| IggyWAL[("Apache Iggy Broker<br/>(Event Store & Event Bus)")]
+        IggyWAL -->|"7. Event Bus Projections"| Projector["State Projector<br/>(Live Read Model)"]
     end
 
     subgraph IAM_Layer ["Authentication & Access Control (Pure Rust)"]
         IAM[("Kanidm IdP Engine<br/>(ferrous-iam:8443)")]
-        Client -.->|OIDC PKCE Login / Bearer JWT| IAM
-        ApiService -.->|Cached JWKS Signature Check| IAM
     end
+
+    %% Cross-tier communication edges
+    Replayer -->|"1. Replay Ingestion (Native TCP: Port 8090)"| Iggy
+    Iggy <-->|"Native SDK"| Bridge
+    ApiService -.->|"Historical Analytical Queries"| DataFusion
+    ApiService -->|"5. Issue Command Mutation"| CQRS
+    Projector -.->|"Read Active Aggregate State"| ApiService
+    Client -.->|"OIDC PKCE Login / Bearer JWT"| IAM
+    ApiService -.->|"Cached JWKS Signature Check"| IAM
 ```
 
 ---
@@ -264,7 +240,7 @@ ferrous-cx/ (This Repository - Core Public Repository: demo config, runtime stac
 | **1** | **`ferrous-streaming`** | [`reidlai/ferrous-streaming`](https://github.com/reidlai/ferrous-streaming) | Consolidated data platform in one compose service: Apache Iggy (<1ms fsync), Arroyo 2PC Delta sinks, the Delta store (`orders_raw_events`, `orders_current_state`, `olist_*`, `llm_benchmarks`) and DataFusion query service | Apache Iggy / Arroyo / Delta Lake (`delta-rs`) / DataFusion |
 | **2** | **`iggy-kafka-bridge`** | [`reidlai/iggy-kafka-bridge`](https://github.com/reidlai/iggy-kafka-bridge) | High-performance pure-Rust Kafka-to-Iggy protocol translation bridge running on port 9092 | Pure-Rust Tokio / Iggy SDK / Kafka Protocol |
 | **3** | **`stream-replay-rs`** | [`reidlai/stream-replay-rs`](https://github.com/reidlai/stream-replay-rs) | Independent, dataset-agnostic multi-sink traffic replayer with timestamp rebasing and speed control | Pure-Rust CLI & Library Crate |
-| **4** | **`ferrous-iam`** | [`reidlai/ferrous-iam`](https://github.com/reidlai/ferrous-iam) | Identity & Access Management for human RBAC and the API (Kanidm IdP, OIDC/OAuth2, residual M2M accounts `svc_ferrous_api` and `svc_ferrous_agent`) | Pure-Rust Kanidm / Docker |
+| **4** | **`ferrous-iam`** | [`reidlai/ferrous-iam`](https://github.com/reidlai/ferrous-iam) | Identity & Access Management container engine (Kanidm pure-Rust IdP, OIDC/OAuth2). Platform personas (`seed-rbac.json`, `seed-m2m.json`) and TLS certificates are decoupled into and managed by `ferrous-cx`. | Pure-Rust Kanidm / Docker |
 | **5** | **`ferrous-vectordb`** | [`reidlai/ferrous-vectordb`](https://github.com/reidlai/ferrous-vectordb) | Qdrant vector database indexing enterprise SOPs & support transcripts | Qdrant Vector DB / FastEmbed |
 | **6** | **`ferrous-cqrses`** | [`reidlai/ferrous-cqrses`](https://github.com/reidlai/ferrous-cqrses) | Dual-Role CQRS Library (`lib.rs`) & Command Handler Service ($20 Credit Cap) | Pure-Rust Library Crate & Service |
 | **7** | **`ferrous-api`** | [`reidlai/ferrous-api`](https://github.com/reidlai/ferrous-api) | Contract-First Axum API Service (Goa DSL, rust-axum, in-process DataFusion <3ms SQL, Axum SSE) | Goa v3 / Axum / DataFusion |
@@ -314,7 +290,7 @@ ferrous-cx/ (This Repository - Core Public Repository: demo config, runtime stac
 ### Prerequisites
 * **Docker & Docker Compose:** v2.29+
 * **PowerShell 7+** (Windows) or **Bash** (macOS/Linux)
-* **Rust 1.80+** (if building or contributing to component crates)
+* **Rust 1.80+** (required for `setup-topics`, `setup-iam`, and `stream-replay-rs`)
 
 ### 1. Clone the Public Repository
 ```bash
@@ -322,10 +298,13 @@ git clone --recurse-submodules https://github.com/reidlai/ferrous-cx.git
 cd ferrous-cx
 ```
 
-### 2. Configure Environment
+### 2. Configure Environment & Generate Dev TLS Certificates
 ```bash
 cp .env.example .env
 cp docker/.env.example docker/.env
+
+# Generate self-signed Dev TLS certificates for Kanidm (pure Rust rcgen)
+cargo run --bin setup-iam -- --generate-certs
 ```
 
 ### 3. Launch the Unified Runtime Stack
@@ -334,14 +313,19 @@ docker compose up -d
 docker compose ps
 ```
 
-### 4. Provision Apache Iggy Topics & Consumer Groups
-The single topic registry provisioner idempotently creates all streams, topics, and consumer groups based on `contracts/topics.yml`:
+### 4. Provision Apache Iggy Topics & IAM Personas
+The automated Cargo provisioners idempotently initialize all streams, topics, consumer groups, and IAM personas:
 ```bash
-# PowerShell
-powershell -ExecutionPolicy Bypass -File scripts/setup-topics.ps1
+# Cross-Platform (Cargo)
+cargo run --bin setup-topics -- --dry-run   # Topic registry conformance audit
+cargo run --bin setup-topics               # Live stream & topic provisioning
 
-# Bash
-bash scripts/setup-topics.sh
+cargo run --bin setup-iam -- --dry-run      # IAM persona & M2M audit
+cargo run --bin setup-iam                  # Idempotent IAM setup
+
+# Optional shell wrappers:
+# Linux/macOS:        ./scripts/setup-topics.sh && ./scripts/setup-iam.sh
+# Windows PowerShell: .\scripts\setup-topics.ps1; .\scripts\setup-iam.ps1
 ```
 
 ### 5. Replay Olist Traffic
@@ -402,9 +386,8 @@ This walk-through is carried over from the former `ferrous-docker` README and ad
 | Tool | Version | Used for |
 | :--- | :--- | :--- |
 | Docker + Compose | `v2.29+` | Building images and running the stack |
-| Rust | `1.80+` | Installing `stream-replay-rs` (`cargo install stream-replay-rs`, or `cargo install --git https://github.com/reidlai/stream-replay-rs` until the crate is published) |
-| `openssl` | any | Generating Kanidm dev TLS certificates (bundled with Git for Windows) |
-| Python | `3.9+` | `ferrous-streaming` provisioning scripts |
+| Rust | `1.80+` | Building `setup-topics`, `setup-iam`, and installing `stream-replay-rs` |
+| Python | `3.9+` | `ferrous-streaming` verification & tooling scripts |
 
 Make sure the submodules are checked out (`git submodule update --init --recursive`).
 
@@ -426,13 +409,21 @@ docker build -t ferrous-iam:latest ferrous-iam
 
 ### 2. Generate Dev TLS Certificates
 
-Kanidm will not boot without TLS material. Generate self-signed certs and place them where the compose file mounts them (`docker/config/certs/chain.pem` and `key.pem`):
+Kanidm requires valid TLS certificates to boot. Generate self-signed development certificates with required SANs (`localhost`, `ferrous-iam`, `ferrouscx.local`, `127.0.0.1`, `::1`) in pure Rust using `rcgen` (zero host `openssl` CLI or Python dependencies):
 
 ```bash
-./ferrous-iam/scripts/generate-dev-certs.sh      # Windows: powershell -ExecutionPolicy Bypass -File ferrous-iam/scripts/generate-dev-certs.ps1
-mkdir -p docker/config/certs
-cp ferrous-iam/config/certs/chain.pem ferrous-iam/config/certs/key.pem docker/config/certs/
+# Cross-Platform (Cargo)
+cargo run --bin setup-iam -- --generate-certs
+
+# Force overwrite existing certificates if needed:
+cargo run --bin setup-iam -- --generate-certs --force
+
+# Optional shell wrappers:
+# Linux/macOS:        ./scripts/setup-iam.sh --generate-certs
+# Windows PowerShell: .\scripts\setup-iam.ps1 -GenerateCerts
 ```
+
+Certificates are generated directly into `config/iam/certs/` (`chain.pem` and `key.pem`), where Docker Compose automatically mounts them into the Kanidm container.
 
 ### 3. Create `docker/.env`
 
@@ -456,27 +447,24 @@ cd ..
 | Arroyo console | `http://localhost:5115` |
 | DataFusion (Flight SQL / HTTP) | `localhost:50051` / `localhost:8085` |
 
-### 5. Provision Topics and Pipelines
+### 5. Provision Topics, Consumer Groups & IAM Personas
 
-`ferrous-cx` owns the FerrousCX topic setup. Load the same Iggy secret that is in `docker/.env`, then run the `ferrous-streaming` provisioners to create stream `orders` with topics `intake` and `consolidated` and the consumer groups, then deploy the Arroyo pipelines:
+`ferrous-cx` owns the platform topic registry and IAM persona configurations. Use the native cross-platform Cargo tools to audit and idempotently provision topics, consumer groups, and IAM personas:
 
 ```bash
-export IGGY_HTTP_JWT_ENCODING_SECRET=$(grep '^IGGY_HTTP_JWT_ENCODING_SECRET=' docker/.env | cut -d= -f2-)
-cd ferrous-streaming
-./scripts/provision-topics.sh
-./scripts/provision-consumer-groups.sh
-./scripts/provision-arroyo.sh
-./scripts/run-migrations.sh
-cd ..
+# Cross-Platform (Cargo)
+cargo run --bin setup-topics -- --dry-run   # Conformance audit & schema check
+cargo run --bin setup-topics               # Live stream & topic provisioning
+
+cargo run --bin setup-iam -- --dry-run      # IAM persona & M2M audit
+cargo run --bin setup-iam                  # Idempotent IAM setup
+
+# Optional shell wrappers:
+# Linux/macOS:        ./scripts/setup-topics.sh && ./scripts/setup-iam.sh
+# Windows PowerShell: .\scripts\setup-topics.ps1; .\scripts\setup-iam.ps1
 ```
 
-PowerShell users run the `.ps1` twin of each script after setting `$env:IGGY_HTTP_JWT_ENCODING_SECRET`. The scripts are idempotent. The consolidation adds the replay topic `olist/orders_stream` and Arroyo Job 3 (`cg-arroyo-olist`) to this set; those scripts are still to be written.
-
-> [!WARNING]
-> **Known state against the Iggy 0.9.0 image the stack builds** (`Dockerfile.iggy` pulls `apache/iggy:latest`, which is not pinned):
-> - `provision-topics` and `provision-consumer-groups` work only with the `ferrous-streaming` fixes that change the admin token's user id from `1` to `0` (Iggy 0.9.0 treats `1` as an unknown user and answers `403`), add the now-required `compression_algorithm` / `max_topic_size` topic fields, base64-encode the partition id, and address streams and topics by name. Without those fixes they stop at `403 unauthorized`.
-> - `provision-arroyo` and `run-migrations` do **not** work: Arroyo reads from Iggy through a Kafka connector on port `9092`, and Iggy 0.9.0 does not serve one.
-> - The `ferrous-streaming` unit tests use mock brokers written for the older API, so they report additional failures after those fixes.
+Both tools support `--dry-run` for non-destructive pre-flight auditing and schema validation against `contracts/topics.yml` and `config/iam/`. They connect directly to running container ports (`http://localhost:3000` for Iggy, `https://localhost:8443` for Kanidm) and are fully idempotent.
 
 ### 6. Run `stream-replay-rs`
 

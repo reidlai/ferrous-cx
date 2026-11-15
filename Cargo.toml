@@ -1,0 +1,23 @@
+[package]
+name = "ferrous-cx"
+version = "0.1.0"
+edition = "2021"
+description = "FerrousCX platform core orchestration, contracts, and cross-platform provisioning tooling"
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "setup-topics"
+path = "src/bin/setup_topics.rs"
+
+[[bin]]
+name = "setup-iam"
+path = "src/bin/setup_iam.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive", "env"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { version = "1.40", features = ["full"] }
+rcgen = "0.13"
