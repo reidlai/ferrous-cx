@@ -29,52 +29,7 @@
 
 ## 🏛️ System Architecture Topology
 
-```text
-                               ┌────────────────────────────────────────────────────────┐
-                               │                    FRONTEND CLIENT                     │
-                               │  Svelte 5 + shadcn-svelte (3-Column Atomic Layout)     │
-                               │  [ Left Menu ]  [ Middle Canvas ]  [ Right Sidecar ]   │
-                               └───────────────────────▲────────────────────────────────┘
-                                                       │  ▲
-                            (1) POST /v1/chat/completions  │ (SSE Stream: Tokens, Tool Events)
-                                                       │  │
-                               ┌───────────────────────┴──┴─────────────────────────────┐
-                               │          FerrousCX API Service (Rust / Axum)           │
-                               │                                                        │
-                               │  • OpenAI-Compatible SSE Streamer                      │
-                               │  • LLM Orchestration via `rig` (Pure Rust)             │
-                               │  • Native Hugging Face (`rig::providers::huggingface`) │
-                               │  • Provider Adapter (HF Qwen2.5, OpenRouter, Gemini)   │
-                               └──────────────┬───────────────────────────┬─────────────┘
-                                              │                           │
-                   Query Historical Lakehouse │                           │ (A) Issue Live Commands
-                   (Only for Historical       │                           │     POST /api/v1/commands
-                    Streaming Datasets)       │                           │
-                                              ▼                           ▼
-┌─────────────────┐                                                       ┌─────────────────┐
-│ Apache          │                                                       │ ferrous-cqrses  │
-│ DataFusion      │                                                       │ Command Handler │
-│ Query Engine    │                                                       │ & Aggregate Root│
-└────────▲────────┘                                                       └────────┬────────┘
-         │                                                                         │
-         │ Vectorized SQL (<3ms)                                                   │ Direct TCP Connection:
-         │ scans Parquet tables                                                    │ Event Store WAL (<1ms)
-         │ (Historical Only)                                                       │ & Event Bus Pub/Sub
-         ▼                                                                         ▼
-┌─────────────────┐  (3) 2PC Micro-Batch  ┌─────────────────┐  (2) Consume Topic  ┌─────────────────┐
-│ Delta Lake      │ ◄──────────────────── │ Arroyo Engine   │ ◄────────────────── │ Apache Iggy     │
-│ (Historical     │      Parquet Sinks    │ (Stream State & │     Historical      │ Message Broker  │
-│  Parquet Store) │                       │  Windowing SQL) │     Stream Topics   │ (WAL / Queues)  │
-└─────────────────┘                       └─────────────────┘                     └────────▲────────┘
-                                                                                           │
-                                                                                           │ (1) Ingest Payload Stream
-                                                                                           │     (Kafka Gateway 9092)
-                                                                                  ┌────────┴────────┐
-                                                                                  │ stream-replay-rs│
-                                                                                  │ (Traffic Replay │
-                                                                                  │  CLI & Library) │
-                                                                                  └─────────────────┘
-```
+The end-to-end dataflow across FerrousCX unites historical lakehouse analytics, high-throughput event replay, sub-millisecond CQRS-ES transaction processing, and pure-Rust identity management:
 
 ```mermaid
 flowchart TD
