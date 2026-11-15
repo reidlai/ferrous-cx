@@ -78,28 +78,28 @@
 
 ```mermaid
 flowchart TD
-    Client["Frontend Client<br/>(Svelte 5 + shadcn-svelte)"] -->|POST /v1/chat/completions| ApiService["FerrousCX API Service<br/>(Rust / Axum + Axum SSE)"]
-    ApiService -->|SSE Event Stream| Client
+    Client["Frontend Client<br/>(Svelte 5 + shadcn-svelte)"] -->|"POST /v1/chat/completions"| ApiService["FerrousCX API Service<br/>(Rust / Axum + Axum SSE)"]
+    ApiService -->|"SSE Event Stream"| Client
 
     subgraph Historical_Path ["Historical Streaming & Analytics Pipeline (Olist)"]
-        Replayer["Traffic Replayer<br/>(stream-replay-rs)"] -->|1. Ingest Payload (Kafka 9092)| IggyStream[("Apache Iggy<br/>Topic: orders/intake")]
-        IggyStream -->|2. Consume Stream Topics| Arroyo["Arroyo Engine<br/>(Stream Windowing & SQL DDL)"]
-        Arroyo -->|3. 2PC Parquet Sinks| DeltaHist[("Delta Lake<br/>(Historical Parquet Sinks)")]
-        DeltaHist -->|4. Vectorized SQL Scan &lt;3ms| DataFusion["Apache DataFusion<br/>(Analytical Query Engine)"]
-        ApiService -.->|Query Delta Lake (Historical Streaming Only)| DataFusion
+        Replayer["Traffic Replayer<br/>(stream-replay-rs)"] -->|"1. Ingest Payload (Kafka 9092)"| IggyStream[("Apache Iggy<br/>Topic: orders/intake")]
+        IggyStream -->|"2. Consume Stream Topics"| Arroyo["Arroyo Engine<br/>(Stream Windowing & SQL DDL)"]
+        Arroyo -->|"3. 2PC Parquet Sinks"| DeltaHist[("Delta Lake<br/>(Historical Parquet Sinks)")]
+        DeltaHist -->|"4. Vectorized SQL Scan <3ms"| DataFusion["Apache DataFusion<br/>(Analytical Query Engine)"]
+        ApiService -.->|"Query Delta Lake (Historical Streaming Only)"| DataFusion
     end
 
     subgraph CQRS_Path ["Transactional CQRS-ES Pipeline (Live Orders)"]
-        ApiService -->|5. Issue Command Mutation| CQRS["Command Handler & Aggregate<br/>(ferrous-cqrses)"]
-        CQRS <-->|6. Direct TCP Connection:<br/>Event Store WAL & Event Bus| IggyWAL[("Apache Iggy Broker<br/>(Event Store & Event Bus)")]
-        IggyWAL -->|7. Event Bus Projections| Projector["State Projector<br/>(Live Read Model)"]
-        Projector -.->|Read Active Aggregate State| ApiService
+        ApiService -->|"5. Issue Command Mutation"| CQRS["Command Handler & Aggregate<br/>(ferrous-cqrses)"]
+        CQRS <-->|"6. Direct TCP Connection:<br/>Event Store WAL & Event Bus"| IggyWAL[("Apache Iggy Broker<br/>(Event Store & Event Bus)")]
+        IggyWAL -->|"7. Event Bus Projections"| Projector["State Projector<br/>(Live Read Model)"]
+        Projector -.->|"Read Active Aggregate State"| ApiService
     end
 
     subgraph IAM_Layer ["Authentication & Access Control (Pure Rust)"]
         IAM[("Kanidm IdP Engine<br/>(ferrous-iam:8443)")]
-        Client -.->|OIDC PKCE Login / Bearer JWT| IAM
-        ApiService -.->|Cached JWKS Signature Check| IAM
+        Client -.->|"OIDC PKCE Login / Bearer JWT"| IAM
+        ApiService -.->|"Cached JWKS Signature Check"| IAM
     end
 ```
 
