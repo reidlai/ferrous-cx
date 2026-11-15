@@ -36,26 +36,47 @@ flowchart TD
     Client["Frontend Client<br/>(Svelte 5 + shadcn-svelte)"] -->|"POST /v1/chat/completions"| ApiService["FerrousCX API Service<br/>(Rust / Axum + Axum SSE)"]
     ApiService -->|"SSE Event Stream"| Client
 
-    subgraph Historical_Path ["Historical Streaming & Analytics Pipeline (Olist)"]
-        Replayer["Traffic Replayer<br/>(stream-replay-rs)"] -->|"1. Ingest Payload (Kafka 9092)"| IggyStream[("Apache Iggy<br/>Topic: orders/intake")]
-        IggyStream -->|"2. Consume Stream Topics"| Arroyo["Arroyo Engine<br/>(Stream Windowing & SQL DDL)"]
-        Arroyo -->|"3. 2PC Parquet Sinks"| DeltaHist[("Delta Lake<br/>(Historical Parquet Sinks)")]
-        DeltaHist -->|"4. Vectorized SQL Scan <3ms"| DataFusion["Apache DataFusion<br/>(Analytical Query Engine)"]
-        ApiService -.->|"Query Delta Lake (Historical Streaming Only)"| DataFusion
+    subgraph Ingestion_Source ["External Traffic Replayer"]
+        Replayer["Traffic Replayer<br/>(stream-replay-rs)"]
+    end
+
+    subgraph Streaming_Tier ["Historical Streaming & Analytics Pipeline (ferrous-streaming)"]
+        Iggy["Apache Iggy Broker<br/>• Port 8090 (Native TCP)<br/>• Port 3000 (HTTP)"]
+        Bridge["iggy-kafka-bridge<br/>• Port 9092 (Kafka wire protocol)"]
+
+        subgraph Arroyo_Engine ["Arroyo Processing Engine"]
+            Migrations["Schema Migrations<br/>(v1 → v2 DDL Evolution)"]
+            SQLPipeline["Arroyo SQL Streaming Jobs<br/>(Stream-to-Parquet Batcher)"]
+        end
+
+        Bridge -->|"2. Consume Stream Topics (Kafka Protocol: bridge:9092)"| SQLPipeline
+        Migrations -->|"DDL Evolution"| SQLPipeline
+
+        DeltaLake[("Delta Lake (2PC ACID Storage)<br/>• orders_raw_events (Audit Log)<br/>• orders_current_state (State Projection)")]
+        SQLPipeline -->|"3. 2PC Micro-Batches & State Projections"| DeltaLake
+
+        DataFusion["Apache DataFusion (query-service)<br/>• Port 50051 (Arrow Flight SQL)<br/>• Port 8085 (HTTP REST)"]
+        DeltaLake -->|"4. Vectorized SQL Scan (sub-3ms)"| DataFusion
     end
 
     subgraph CQRS_Path ["Transactional CQRS-ES Pipeline (Live Orders)"]
-        ApiService -->|"5. Issue Command Mutation"| CQRS["Command Handler & Aggregate<br/>(ferrous-cqrses)"]
+        CQRS["Command Handler & Aggregate<br/>(ferrous-cqrses)"]
         CQRS <-->|"6. Direct TCP Connection:<br/>Event Store WAL & Event Bus"| IggyWAL[("Apache Iggy Broker<br/>(Event Store & Event Bus)")]
         IggyWAL -->|"7. Event Bus Projections"| Projector["State Projector<br/>(Live Read Model)"]
-        Projector -.->|"Read Active Aggregate State"| ApiService
     end
 
     subgraph IAM_Layer ["Authentication & Access Control (Pure Rust)"]
         IAM[("Kanidm IdP Engine<br/>(ferrous-iam:8443)")]
-        Client -.->|"OIDC PKCE Login / Bearer JWT"| IAM
-        ApiService -.->|"Cached JWKS Signature Check"| IAM
     end
+
+    %% Cross-tier communication edges
+    Replayer -->|"1. Replay Ingestion (Native TCP: Port 8090)"| Iggy
+    Iggy <-->|"Native SDK"| Bridge
+    ApiService -.->|"Historical Analytical Queries"| DataFusion
+    ApiService -->|"5. Issue Command Mutation"| CQRS
+    Projector -.->|"Read Active Aggregate State"| ApiService
+    Client -.->|"OIDC PKCE Login / Bearer JWT"| IAM
+    ApiService -.->|"Cached JWKS Signature Check"| IAM
 ```
 
 ---
