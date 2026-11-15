@@ -1,0 +1,30 @@
+[submodule "ferrous-iam"]
+	path = ferrous-iam
+	url = https://github.com/reidlai/ferrous-iam.git
+[submodule "ferrous-streaming"]
+	path = ferrous-streaming
+	url = https://github.com/reidlai/ferrous-streaming.git
+[submodule "stream-replay-rs"]
+	path = stream-replay-rs
+	url = https://github.com/reidlai/stream-replay-rs.git
+[submodule "ferrous-vectordb"]
+	path = ferrous-vectordb
+	url = https://github.com/reidlai/ferrous-vectordb.git
+[submodule "ferrous-cqrses"]
+	path = ferrous-cqrses
+	url = https://github.com/reidlai/ferrous-cqrses.git
+[submodule "ferrous-api"]
+	path = ferrous-api
+	url = https://github.com/reidlai/ferrous-api.git
+[submodule "ferrous-agent"]
+	path = ferrous-agent
+	url = https://github.com/reidlai/ferrous-agent.git
+[submodule "ferrous-frontend"]
+	path = ferrous-frontend
+	url = https://github.com/reidlai/ferrous-frontend.git
+[submodule "ferrous-reverseproxy"]
+	path = ferrous-reverseproxy
+	url = https://github.com/reidlai/ferrous-reverseproxy.git
+[submodule "iggy-kafka-bridge"]
+	path = iggy-kafka-bridge
+	url = https://github.com/reidlai/iggy-kafka-bridge.git

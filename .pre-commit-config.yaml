@@ -44,3 +44,10 @@ repos:
         language: system
         files: (contracts/topics\.ya?ml|profiles/.*\.toml|docs/quickstart\.md|docs/datasets/olist/.*)$
         pass_filenames: false
+
+      - id: check-submodules
+        name: Submodule Aggregation & One-Way Dependency Gate (AD-26)
+        entry: bash scripts/check-submodules.sh
+        language: system
+        files: (\.gitmodules|scripts/check-submodules\..*)$
+        pass_filenames: false

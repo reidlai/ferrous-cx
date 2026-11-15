@@ -1,0 +1,63 @@
+name: ferrous-cx DevSecOps CI
+
+on:
+  push:
+    branches:
+      - main
+      - 'epic-*'
+  pull_request:
+    branches:
+      - main
+      - 'epic-*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  devsecops-quality-and-security-gate:
+    name: Tier 2 DevSecOps & Orchestration Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Pre-Commit & Tools
+        run: |
+          pip install pre-commit
+          sudo apt-get update && sudo apt-get install -y curl jq
+
+      - name: "[1/6] Docker Compose Syntax Gate"
+        run: |
+          cd docker
+          docker compose config >/dev/null
+          cd ..
+          docker compose config >/dev/null
+
+      - name: "[2/6] Compose Topology & Day-0 Security Gate (scripts/validate-compose.sh)"
+        run: bash scripts/validate-compose.sh
+
+      - name: "[3/6] 3-Tier OpenTelemetry & Jaeger Gate (scripts/validate-telemetry.sh)"
+        run: bash scripts/validate-telemetry.sh
+
+      - name: "[4/6] Quickstart, Registry & Replay Profile Gate (scripts/validate-quickstart.sh)"
+        run: bash scripts/validate-quickstart.sh
+
+      - name: "[5/6] Submodule Aggregation & One-Way Dependency Gate (scripts/check-submodules.sh)"
+        run: bash scripts/check-submodules.sh
+
+      - name: "[6/6] Pre-Commit & Secret Scanning (pre-commit run --all-files)"
+        run: pre-commit run --all-files
