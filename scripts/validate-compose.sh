@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Automated Docker Compose validation script for FerrousCX master topology (Story 12.1).
-set -euo pipefail
+set -eu
+set -o pipefail 2>/dev/null || true
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"

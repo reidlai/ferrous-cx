@@ -116,9 +116,14 @@ if ($qsContent -notmatch "stream-replay-rs") {
 Write-Host "  [OK] docs/quickstart.md verified (Why 10x derivation, rate 25, read-only UI, Kanidm isolation)." -ForegroundColor Green
 
 # 5. Run Dry-Run Topic Setup
-Write-Host "`n[5/5] Executing setup-topics.ps1 dry-run verification..." -ForegroundColor Green
+Write-Host "`n[5/6] Executing setup-topics.ps1 dry-run verification..." -ForegroundColor Green
 & "$ProjectRoot/scripts/setup-topics.ps1" -DryRun
 Write-Host "  [OK] setup-topics.ps1 executed cleanly in dry-run mode." -ForegroundColor Green
+
+# 6. Run Dry-Run IAM Setup
+Write-Host "`n[6/6] Executing setup-iam.ps1 dry-run verification..." -ForegroundColor Green
+& "$ProjectRoot/scripts/setup-iam.ps1" -DryRun
+Write-Host "  [OK] setup-iam.ps1 executed cleanly in dry-run mode." -ForegroundColor Green
 
 Write-Host "`n==========================================================" -ForegroundColor Cyan
 Write-Host "  [OK] QUICKSTART & REGISTRY AUDIT COMPLETED CLEANLY!     " -ForegroundColor Green

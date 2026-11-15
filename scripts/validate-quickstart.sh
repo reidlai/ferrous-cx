@@ -132,9 +132,15 @@ echo "  [OK] docs/quickstart.md verified (Why 10x derivation, rate 25, read-only
 
 # 5. Run Dry-Run Topic Setup
 echo ""
-echo "[5/5] Executing setup-topics.sh dry-run verification..."
+echo "[5/6] Executing setup-topics.sh dry-run verification..."
 bash "${PROJECT_ROOT}/scripts/setup-topics.sh" --dry-run
 echo "  [OK] setup-topics.sh executed cleanly in dry-run mode."
+
+# 6. Run Dry-Run IAM Setup
+echo ""
+echo "[6/6] Executing setup-iam.sh dry-run verification..."
+bash "${PROJECT_ROOT}/scripts/setup-iam.sh" --dry-run
+echo "  [OK] setup-iam.sh executed cleanly in dry-run mode."
 
 echo ""
 echo "=========================================================="

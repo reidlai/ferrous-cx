@@ -1,0 +1,19 @@
+{
+  "domain": "ferrouscx.local",
+  "service_accounts": [
+    {
+      "account_id": "svc_ferrous_api",
+      "display_name": "Ferrous API Gateway Service",
+      "description": "M2M account for ferrous-api command dispatch, token exchange, and query execution",
+      "scopes": ["api:gateway", "command:dispatch", "query:lakehouse", "auth:introspect"],
+      "token_exchange_enabled": true
+    },
+    {
+      "account_id": "svc_ferrous_agent",
+      "display_name": "Autonomous Resolution Agent Service",
+      "description": "M2M account for autonomous agent reasoning, vector embeddings, and action proposal dispatch",
+      "scopes": ["agent:reasoning", "vectordb:query", "proposal:submit", "lakehouse:read"],
+      "token_exchange_enabled": true
+    }
+  ]
+}

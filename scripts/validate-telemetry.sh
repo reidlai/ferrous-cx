@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Automated OpenTelemetry 3-Tier developer runtime & Jaeger validator (Story 12.2).
-set -euo pipefail
+set -eu
+set -o pipefail 2>/dev/null || true
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
