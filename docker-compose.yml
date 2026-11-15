@@ -1,0 +1,9 @@
+# ==============================================================================
+# FerrousCX Root Docker Compose Convenience Wrapper
+# Directs to primary topology under docker/docker-compose.yml
+# ==============================================================================
+
+name: ferrous-cx
+
+include:
+  - path: ./docker/docker-compose.yml

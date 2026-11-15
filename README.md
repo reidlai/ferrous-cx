@@ -4,7 +4,7 @@
 
 [![Public Architecture Hub](https://img.shields.io/badge/hub-Public%20Root%20Architecture-blue.svg)](https://github.com/reidlai/ferrous-cx)
 [![Architecture Standard: Pure Rust + Svelte 5](https://img.shields.io/badge/stack-Pure%20Rust%20%2B%20Svelte%205-orange.svg)](https://github.com/reidlai/ferrous-cx)
-[![Components: 9 Repositories](https://img.shields.io/badge/components-9%20Git%20Repositories-purple.svg)](#2-component-repositories-nine-autonomous-repositories)
+[![Components: 10 Repositories](https://img.shields.io/badge/components-10%20Git%20Repositories-purple.svg)](#2-component-repositories-ten-autonomous-repositories)
 [![Runtime: Docker Compose](https://img.shields.io/badge/orchestration-Docker%20Compose%20v2.29+-blue.svg)](https://docs.docker.com/compose/)
 [![Telemetry: OpenTelemetry](https://img.shields.io/badge/telemetry-OpenTelemetry%20%2B%20Jaeger-orange.svg)](https://opentelemetry.io/)
 [![License: MIT / Apache-2.0](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-green.svg)](LICENSE)
@@ -255,99 +255,135 @@ ferrous-cx/ (This Repository - Core Public Repository: demo config, runtime stac
 
 ---
 
-### 2. Component Repositories (Nine Autonomous Repositories)
+### 2. Component Repositories (Ten Autonomous Repositories)
 
-`ferrous-cx` aggregates nine single-responsibility Git repositories as submodules. Each component is decoupled, contains its own documentation, pre-commit validation, and container builds. Dependencies point one way: a component must never include `ferrous-cx`, or a repository that contains it, as a submodule (components may link to `ferrous-cx` in their README).
+`ferrous-cx` aggregates ten single-responsibility Git repositories as submodules. Each component is decoupled, contains its own documentation, pre-commit validation, and container builds. Dependencies point strictly one way: **a component must never include `ferrous-cx`, or a repository that contains it, as a submodule or path dependency** (AD-26).
 
 | # | Component | Repository | Architectural Role | Tech Stack |
 | :-: | :--- | :--- | :--- | :--- |
-| **1** | **`ferrous-streaming`** | [`reidlai/ferrous-streaming`](https://github.com/reidlai/ferrous-streaming) | Consolidated data platform in one compose service: Apache Iggy (<1ms fsync, Kafka gateway), Arroyo 2PC Delta sinks, the Delta store (`orders_raw_events`, `orders_current_state`, `olist_*`, `llm_benchmarks`) and a DataFusion query service; also carries the public benchmark | Apache Iggy / Arroyo / Delta Lake (`delta-rs`) / DataFusion |
-| **2** | **`stream-replay-rs`** | [`reidlai/stream-replay-rs`](https://github.com/reidlai/stream-replay-rs) | Independent, dataset-agnostic multi-sink traffic replayer with timestamp rebasing and speed control | Pure-Rust CLI & Library Crate |
-| **3** | **`ferrous-iam`** | [`reidlai/ferrous-iam`](https://github.com/reidlai/ferrous-iam) | Identity & Access Management for human RBAC and the API (Kanidm IdP, OIDC/OAuth2, residual M2M accounts `svc_ferrous_api` and `svc_ferrous_agent`) | Pure-Rust Kanidm / Docker |
-| **4** | **`ferrous-vectordb`** | [`reidlai/ferrous-vectordb`](https://github.com/reidlai/ferrous-vectordb) | Qdrant vector database indexing enterprise SOPs & support transcripts | Qdrant Vector DB / FastEmbed |
-| **5** | **`ferrous-cqrses`** | [`reidlai/ferrous-cqrses`](https://github.com/reidlai/ferrous-cqrses) | Dual-Role CQRS Library (`lib.rs`) & Command Handler Service ($20 Credit Cap) | Pure-Rust Library Crate & Service |
-| **6** | **`ferrous-api`** | [`reidlai/ferrous-api`](https://github.com/reidlai/ferrous-api) | Contract-First Axum API Service (Goa DSL, rust-axum, in-process DataFusion <3ms SQL, Axum SSE) | Goa v3 / Axum / DataFusion |
-| **7** | **`ferrous-agent`** | [`reidlai/ferrous-agent`](https://github.com/reidlai/ferrous-agent) | Pure-Rust Multi-Provider AI Engine (`rig-core`), Context Sanitizer & In-Process Benchmarks | `rig-core` / Context Sanitizer |
-| **8** | **`ferrous-frontend`** | [`reidlai/ferrous-frontend`](https://github.com/reidlai/ferrous-frontend) | Svelte 5 + shadcn-svelte 3-column UI workbench, including the read-only Replay Monitor | Svelte 5 / shadcn-svelte / RxJS / Tailwind |
-| **9** | **`ferrous-reverseproxy`** | [`reidlai/ferrous-reverseproxy`](https://github.com/reidlai/ferrous-reverseproxy) | Zentinel (Cloudflare Pingora) Edge Reverse Proxy, TLS 1.3 Termination & OWASP WAF | Pure-Rust Zentinel / Pingora / CRS |
-
-The former `ferrous-lakehouse` and `ferrous-query-engine` repositories are consolidated into `ferrous-streaming`, and the former `ferrous-docker` repository is merged into this repository (see below).
+| **1** | **`ferrous-streaming`** | [`reidlai/ferrous-streaming`](https://github.com/reidlai/ferrous-streaming) | Consolidated data platform in one compose service: Apache Iggy (<1ms fsync), Arroyo 2PC Delta sinks, the Delta store (`orders_raw_events`, `orders_current_state`, `olist_*`, `llm_benchmarks`) and DataFusion query service | Apache Iggy / Arroyo / Delta Lake (`delta-rs`) / DataFusion |
+| **2** | **`iggy-kafka-bridge`** | [`reidlai/iggy-kafka-bridge`](https://github.com/reidlai/iggy-kafka-bridge) | High-performance pure-Rust Kafka-to-Iggy protocol translation bridge running on port 9092 | Pure-Rust Tokio / Iggy SDK / Kafka Protocol |
+| **3** | **`stream-replay-rs`** | [`reidlai/stream-replay-rs`](https://github.com/reidlai/stream-replay-rs) | Independent, dataset-agnostic multi-sink traffic replayer with timestamp rebasing and speed control | Pure-Rust CLI & Library Crate |
+| **4** | **`ferrous-iam`** | [`reidlai/ferrous-iam`](https://github.com/reidlai/ferrous-iam) | Identity & Access Management for human RBAC and the API (Kanidm IdP, OIDC/OAuth2, residual M2M accounts `svc_ferrous_api` and `svc_ferrous_agent`) | Pure-Rust Kanidm / Docker |
+| **5** | **`ferrous-vectordb`** | [`reidlai/ferrous-vectordb`](https://github.com/reidlai/ferrous-vectordb) | Qdrant vector database indexing enterprise SOPs & support transcripts | Qdrant Vector DB / FastEmbed |
+| **6** | **`ferrous-cqrses`** | [`reidlai/ferrous-cqrses`](https://github.com/reidlai/ferrous-cqrses) | Dual-Role CQRS Library (`lib.rs`) & Command Handler Service ($20 Credit Cap) | Pure-Rust Library Crate & Service |
+| **7** | **`ferrous-api`** | [`reidlai/ferrous-api`](https://github.com/reidlai/ferrous-api) | Contract-First Axum API Service (Goa DSL, rust-axum, in-process DataFusion <3ms SQL, Axum SSE) | Goa v3 / Axum / DataFusion |
+| **8** | **`ferrous-agent`** | [`reidlai/ferrous-agent`](https://github.com/reidlai/ferrous-agent) | Pure-Rust Multi-Provider AI Engine (`rig-core`), Context Sanitizer & In-Process Benchmarks | `rig-core` / Context Sanitizer |
+| **9** | **`ferrous-frontend`** | [`reidlai/ferrous-frontend`](https://github.com/reidlai/ferrous-frontend) | Svelte 5 + shadcn-svelte 3-column UI workbench, including the read-only Replay Monitor | Svelte 5 / shadcn-svelte / RxJS / Tailwind |
+| **10** | **`ferrous-reverseproxy`** | [`reidlai/ferrous-reverseproxy`](https://github.com/reidlai/ferrous-reverseproxy) | Zentinel (Cloudflare Pingora) Edge Reverse Proxy, TLS 1.3 Termination & OWASP WAF | Pure-Rust Zentinel / Pingora / CRS |
 
 ---
 
-## 🐳 Runtime Orchestration & OpenTelemetry (formerly `ferrous-docker`)
+## 🐳 Runtime Orchestration & OpenTelemetry
 
-`ferrous-cx` provides the unified integration and developer runtime harness for the platform. This section carries over the former `ferrous-docker` README, updated for the consolidated topology.
+`ferrous-cx` provides the unified integration, Day-0 security hardening, and developer runtime harness for the platform:
 
 1. **Zero-Daemon Local Development:** Launch the platform with a single `docker compose up -d`, requiring zero external host dependencies.
 2. **Explicit Healthcheck Dependency Graph:** Startup is gated with `condition: service_healthy`. Iggy (`ferrous-streaming`) and Qdrant boot first, then storage consumers, `ferrous-cqrses`, the API gateway, reverse proxy and frontend. `ferrous-iam` gates only `ferrous-api`, `ferrous-agent` and `ferrous-frontend`; the data platform does not depend on it.
-3. **3-Tier OpenTelemetry Developer Runtime** (unrelated to the Tier 1 / Tier 2 CI repository tiers):
+3. **Day-0 Kernel Hardening:** All application containers enforce:
+   - `read_only: true` (immutable root filesystem).
+   - `cap_drop: ALL` (zero elevated Linux capabilities).
+   - `security_opt: [no-new-privileges:true]`.
+   - `tmpfs: /tmp:noexec,nosuid,nodev,size=64M`.
+4. **3-Tier OpenTelemetry Developer Runtime:**
    - **Tier 1 (Disabled):** `OTEL_SDK_DISABLED=true` (zero span overhead, clean stdout).
    - **Tier 2 (Console):** `OTEL_TRACES_EXPORTER=console` (human-readable trace logs in the terminal).
-   - **Tier 3 (OTLP Egress):** Ephemeral in-memory Jaeger All-In-One (`jaegertracing/all-in-one:latest`) on ports 4317/4318 with the Web UI on 16686.
-4. **Pre-Commit DevSecOps Automation:** Hooks verify secret leakage (`gitleaks`), Dockerfile hygiene (`hadolint`) and vulnerability scanning (`trivy`) across the component repositories.
-5. **Platform Smoke Validation:** Scripted end-to-end checks (`smoke-test.sh` / `smoke-test.ps1`) over the multi-service lifecycle.
+   - **Tier 3 (OTLP Egress):** Ephemeral in-memory Jaeger All-In-One (`jaegertracing/jaeger:2.3.0`) on ports 4317 (gRPC) and 4318 (HTTP), with the Web UI on port 16686.
+5. **Pre-Commit DevSecOps Automation:** Hooks verify secret leakage (`gitleaks`), compose syntax, topology security, OpenTelemetry wiring, and quickstart documentation.
+6. **Platform Smoke Validation:** Scripted end-to-end checks (`smoke-test.sh` / `smoke-test.ps1`) verify all 8 HTTP/HTTPS endpoints across the stack.
 
 ### Runtime Topology
 
-Ports for `ferrous-cqrses`, `ferrous-agent` and `ferrous-frontend` are carried over from the former `ferrous-docker` README and differ from the PRD addendum (agent `8081`, frontend `5173`); the architecture update fixes the final assignment.
-
-| Component | Container service | Primary ports | Healthcheck probe |
-| :--- | :--- | :---: | :--- |
-| `ferrous-iam` | `kanidmd` | `8443`, `3636` | `kanidmd healthcheck` |
-| `ferrous-streaming` | one service: Iggy, Arroyo, Delta store, DataFusion | Iggy `3000` (HTTP), `8090` (TCP), `9092` (Kafka gateway); Arroyo `5115`; DataFusion `50051` (Flight SQL), `8085` (HTTP) | Iggy ping, Arroyo health, `SELECT 1` |
-| `stream-replay-rs` | on-demand CLI job (not a long-running service) | n/a | n/a |
-| `ferrous-vectordb` | `qdrant` | `6333`, `6334` | `GET /readyz` HTTP 200 |
-| `ferrous-cqrses` | `command-handler` | `8081` | Socket / partition liveness |
-| `ferrous-api` | `axum-gateway` | `8080` | `GET /health/ready` HTTP 200 |
-| `ferrous-agent` | `agent-service` | `8082` | `GET /health` HTTP 200 |
-| `ferrous-frontend` | `web-studio` | `3000` | `GET /healthz` HTTP 200 |
-| `ferrous-reverseproxy` | `zentinel` | `80`, `443` | TLS port 443 handshake |
-| `ferrous-cx` | `jaeger` (ephemeral) | `16686`, `4317`, `4318` | `GET /` HTTP 200 |
-
-> [!NOTE]
-> Port `3000` is claimed by both the Iggy HTTP API (`ferrous-streaming`) and `web-studio` in this carried-over table. Resolve the collision in the architecture update before the compose file is written.
-
-### DevSecOps & Smoke Testing
-
-- Pre-commit hooks run `hadolint` and `trivy` on the Dockerfiles of every component repository.
-- All containers run as non-root users with read-only root filesystems where applicable.
+| Component | Container Service | Primary Ports | Healthcheck Probe | Day-0 Hardened |
+| :--- | :--- | :---: | :--- | :---: |
+| `ferrous-iam` | `kanidmd` | `8443` (HTTPS), `3636` (LDAPS) | `/sbin/kanidmd version` | Read-only |
+| `ferrous-streaming` | `ferrous-streaming` | `3000` (HTTP), `8090` (TCP) | Iggy ping HTTP 200 | Yes |
+| `iggy-kafka-bridge` | `bridge` | `9092` (Kafka Wire Protocol) | TCP port 9092 open | Yes |
+| `ferrous-vectordb` | `ferrous-vectordb` | `6333` (HTTP), `6334` (gRPC) | `GET /readyz` HTTP 200 | Yes |
+| `ferrous-cqrses` | `ferrous-cqrses` | Internal | Command handler startup | Yes |
+| `ferrous-api` | `ferrous-api` | `8080` (HTTP) | `GET /health` HTTP 200 | Yes |
+| `ferrous-agent` | `ferrous-agent` | `8081` (HTTP) | `GET /health` HTTP 200 | Yes |
+| `ferrous-frontend` | `ferrous-frontend` | `5173` (HTTP) | `GET /health` HTTP 200 | Yes |
+| `ferrous-reverseproxy` | `ferrous-reverseproxy`| `80` (HTTP), `443` (HTTPS) | TCP port 80 check | Yes |
+| `ferrous-cx` | `jaeger` (ephemeral) | `16686` (UI), `4317` (gRPC), `4318` (HTTP) | `GET /` HTTP 200 | Yes |
 
 ---
 
 ## 🛠️ Developer Quickstart
 
 ### Prerequisites
-* **Rust:** `1.80+` (`rustup update stable`)
-* **Node.js:** `20+` and `pnpm`
-* **Docker & Docker Compose:** For running the local containerized stack
+* **Docker & Docker Compose:** v2.29+
+* **PowerShell 7+** (Windows) or **Bash** (macOS/Linux)
+* **Rust 1.80+** (if building or contributing to component crates)
 
-### Workflow Options
-
-#### Option A: Develop on a Standalone Submodule
-Each repository can be cloned and tested independently with zero monorepo coupling:
-```bash
-git clone https://github.com/reidlai/ferrous-api.git
-cd ferrous-api
-cargo test
-```
-
-#### Option B: Boot the Full Containerized Platform from `ferrous-cx`
-To run the complete platform locally, clone this repository with its component submodules and start the compose stack:
+### 1. Clone the Public Repository
 ```bash
 git clone --recurse-submodules https://github.com/reidlai/ferrous-cx.git
 cd ferrous-cx
-docker compose up -d
-# Target: all services green through healthcheck gating in <180s
-docker compose ps                      # real-time status and health
-open http://localhost:16686            # distributed traces in Jaeger (Tier 3)
-./scripts/smoke-test.sh                # end-to-end platform smoke test
 ```
 
-> [!WARNING]
-> The compose file, configuration and smoke-test scripts are **not yet in this repository**. The former `ferrous-docker` repository held only its README, so these artifacts are still to be built here (compose stack under `docker/`, scripts under `scripts/`). The commands above are the target interface.
+### 2. Configure Environment
+```bash
+cp .env.example .env
+cp docker/.env.example docker/.env
+```
 
-#### Option C: Full Multi-Component Development Workspace (`ferrouscx-bmad`)
+### 3. Launch the Unified Runtime Stack
+```bash
+docker compose up -d
+docker compose ps
+```
+
+### 4. Provision Apache Iggy Topics & Consumer Groups
+The single topic registry provisioner idempotently creates all streams, topics, and consumer groups based on `contracts/topics.yml`:
+```bash
+# PowerShell
+powershell -ExecutionPolicy Bypass -File scripts/setup-topics.ps1
+
+# Bash
+bash scripts/setup-topics.sh
+```
+
+### 5. Replay Olist Traffic
+Produce real-world e-commerce traffic through the Iggy-Kafka bridge (`127.0.0.1:9092`):
+```bash
+# Option A: Run directly via Cargo
+# From a recursive standalone clone:
+cargo run --release --manifest-path ./stream-replay-rs/Cargo.toml -- --config profiles/olist-demo.toml
+# Or from a sibling monorepo workspace:
+cargo run --release --manifest-path ../stream-replay-rs/Cargo.toml -- --config profiles/olist-demo.toml
+
+# Option B: Run installed binary
+stream-replay-rs --config profiles/olist-demo.toml
+```
+
+### 6. Inspect Services & Observability
+- **Perimeter Reverse Proxy:** `https://localhost:443/` (or `http://localhost:80/`)
+- **Direct Frontend UI:** `http://localhost:5173/` (Operator Studio, strictly read-only)
+- **Distributed Traces (Jaeger):** `http://localhost:16686/`
+- **End-to-End Smoke Test:**
+  ```bash
+  powershell -ExecutionPolicy Bypass -File scripts/smoke-test.ps1
+  # or: bash scripts/smoke-test.sh
+  ```
+- **Vulnerability Audit:**
+  ```bash
+  powershell -ExecutionPolicy Bypass -File scripts/scan-vulnerabilities.ps1
+  # or: bash scripts/scan-vulnerabilities.sh
+  ```
+
+---
+
+## 🔒 The One-Way Dependency Rule (AD-26)
+
+`ferrous-cx` acts as the root orchestrator and aggregator. To prevent circular dependencies:
+1. **No component submodule may reference `ferrous-cx`** in `.gitmodules`, configuration files, or source code.
+2. Component submodules are independently buildable, testable, and releasable.
+3. The automated audit script enforces this rule across all 10 component repositories:
+   ```bash
+   powershell -ExecutionPolicy Bypass -File scripts/check-submodules.ps1
+   # or: bash scripts/check-submodules.sh
+   ```
 For contributors working on the BMAD planning artifacts and the components together:
 ```bash
 git clone --recurse-submodules https://github.com/reidlai/ferrouscx-bmad.git

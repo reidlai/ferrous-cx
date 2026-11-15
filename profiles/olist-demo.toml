@@ -1,0 +1,30 @@
+# ==============================================================================
+# FerrousCX Olist Demo Replay Profile (Story 12.4, FR-1, FR-1b)
+# Paced at 10x compression on order_purchase_timestamp (~1 order per minute)
+# Targets Iggy-Kafka bridge on 127.0.0.1:9092 without Kanidm account credentials
+# ==============================================================================
+
+[dataset]
+input_path = "docs/datasets/olist/olist_orders_dataset.csv"
+format = "csv"
+timestamp_column = "order_purchase_timestamp"
+timestamp_unit = "rfc3339"
+shift_columns = [
+    "order_approved_at",
+    "order_delivered_carrier_date",
+    "order_delivered_customer_date",
+    "order_estimated_delivery_date"
+]
+partition_key = "order_id"
+
+[replay]
+speed = 10.0
+event_time = "compress"
+loop = true
+advance_timestamps = true
+loop_id_salt = true
+
+[sink]
+default_type = "kafka"
+default_url = "127.0.0.1:9092"
+destination = "olist.orders_stream"

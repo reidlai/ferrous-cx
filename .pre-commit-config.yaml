@@ -1,0 +1,53 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: ['--allow-multiple-documents']
+      - id: check-json
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      - id: compose-config-audit
+        name: Docker Compose Syntax Gate (docker compose config)
+        entry: bash -c "cd docker && (docker compose config >/dev/null || docker.exe compose config >/dev/null) && cd .. && (docker compose config >/dev/null || docker.exe compose config >/dev/null)"
+        language: system
+        files: docker-compose.*\.ya?ml$
+        pass_filenames: false
+
+      - id: validate-topology
+        name: Compose Topology & Day-0 Security Gate
+        entry: bash scripts/validate-compose.sh
+        language: system
+        files: (docker-compose.*\.ya?ml|\.env\.example)$
+        pass_filenames: false
+
+      - id: validate-telemetry
+        name: 3-Tier OpenTelemetry & Jaeger Gate
+        entry: bash scripts/validate-telemetry.sh
+        language: system
+        files: (docker-compose.*\.ya?ml|\.env\.example)$
+        pass_filenames: false
+
+      - id: validate-quickstart
+        name: Quickstart, Registry & Replay Profile Gate
+        entry: bash scripts/validate-quickstart.sh
+        language: system
+        files: (contracts/topics\.ya?ml|profiles/.*\.toml|docs/quickstart\.md|docs/datasets/olist/.*)$
+        pass_filenames: false
+
+      - id: check-submodules
+        name: Submodule Aggregation & One-Way Dependency Gate (AD-26)
+        entry: bash scripts/check-submodules.sh
+        language: system
+        files: (\.gitmodules|scripts/check-submodules\..*)$
+        pass_filenames: false
