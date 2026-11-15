@@ -292,11 +292,13 @@ docker compose ps
 ### 4. Provision Apache Iggy Topics & Consumer Groups
 The single topic registry provisioner idempotently creates all streams, topics, and consumer groups based on `contracts/topics.yml`:
 ```bash
-# PowerShell
-powershell -ExecutionPolicy Bypass -File scripts/setup-topics.ps1
+# Cross-Platform (Cargo)
+cargo run --bin setup-topics -- --dry-run   # Conformance audit & schema check
+cargo run --bin setup-topics               # Live stream & topic provisioning
 
-# Bash
-bash scripts/setup-topics.sh
+# Optional shell wrappers:
+# PowerShell: powershell -ExecutionPolicy Bypass -File scripts/setup-topics.ps1
+# Bash:       bash scripts/setup-topics.sh
 ```
 
 ### 5. Replay Olist Traffic

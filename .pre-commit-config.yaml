@@ -42,7 +42,7 @@ repos:
         name: Quickstart, Registry & Replay Profile Gate
         entry: bash scripts/validate-quickstart.sh
         language: system
-        files: (contracts/topics\.ya?ml|profiles/.*\.toml|docs/quickstart\.md|docs/datasets/olist/.*)$
+        files: (contracts/topics\.ya?ml|profiles/.*\.toml|docs/quickstart\.md|docs/datasets/olist/.*|Cargo\.toml|src/.*\.rs|tests/.*\.rs)$
         pass_filenames: false
 
       - id: check-submodules

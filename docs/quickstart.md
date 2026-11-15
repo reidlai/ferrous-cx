@@ -48,18 +48,20 @@ All 8 service probes should return `[OK]` within 15 seconds.
 Run the automated topic provisioner to initialize the Apache Iggy streams and consumer groups declared in `contracts/topics.yml`:
 
 ```bash
-# Linux/macOS
-./scripts/setup-topics.sh
+# Cross-Platform (Cargo)
+cargo run --bin setup-topics -- --dry-run   # Conformance audit
+cargo run --bin setup-topics               # Live provisioning
 
-# Windows PowerShell
-.\scripts\setup-topics.ps1
+# Optional shell wrappers:
+# Linux/macOS:        ./scripts/setup-topics.sh
+# Windows PowerShell: .\scripts\setup-topics.ps1
 ```
 
 The provisioner idempotently creates:
 - **Stream `orders`:** Topics `orders/intake` and `orders/consolidated` (4 partitions, replicated durability).
 - **Stream `olist`:** Topic `olist/orders_stream` (4 partitions, persisted durability).
 - **Stream `benchmark`:** Topic `benchmark/hpc_mqbench` (4 partitions, persisted durability).
-- **Consumer Groups:** Native group `cg-cmd-handler` on `orders/intake`, plus bridge consumer groups `cg-arroyo-raw`, `cg-arroyo-state`, `cg-arroyo-olist`, and `cg-arroyo-benchmark`.
+- **Consumer Groups:** Bridge consumer groups declared in the contract: `cg-arroyo-raw`, `cg-arroyo-state`, `cg-arroyo-olist`, and `cg-arroyo-benchmark`.
 
 ---
 

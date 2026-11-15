@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Automated Validator for Quickstart, Topic Registry, Dataset & Replay Profiles (Story 12.4).
-set -euo pipefail
+set -eu
+set -o pipefail 2>/dev/null || true
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
