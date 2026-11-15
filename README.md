@@ -219,7 +219,7 @@ ferrous-cx/ (This Repository - Core Public Repository: demo config, runtime stac
 | **1** | **`ferrous-streaming`** | [`reidlai/ferrous-streaming`](https://github.com/reidlai/ferrous-streaming) | Consolidated data platform in one compose service: Apache Iggy (<1ms fsync), Arroyo 2PC Delta sinks, the Delta store (`orders_raw_events`, `orders_current_state`, `olist_*`, `llm_benchmarks`) and DataFusion query service | Apache Iggy / Arroyo / Delta Lake (`delta-rs`) / DataFusion |
 | **2** | **`iggy-kafka-bridge`** | [`reidlai/iggy-kafka-bridge`](https://github.com/reidlai/iggy-kafka-bridge) | High-performance pure-Rust Kafka-to-Iggy protocol translation bridge running on port 9092 | Pure-Rust Tokio / Iggy SDK / Kafka Protocol |
 | **3** | **`stream-replay-rs`** | [`reidlai/stream-replay-rs`](https://github.com/reidlai/stream-replay-rs) | Independent, dataset-agnostic multi-sink traffic replayer with timestamp rebasing and speed control | Pure-Rust CLI & Library Crate |
-| **4** | **`ferrous-iam`** | [`reidlai/ferrous-iam`](https://github.com/reidlai/ferrous-iam) | Identity & Access Management for human RBAC and the API (Kanidm IdP, OIDC/OAuth2, residual M2M accounts `svc_ferrous_api` and `svc_ferrous_agent`) | Pure-Rust Kanidm / Docker |
+| **4** | **`ferrous-iam`** | [`reidlai/ferrous-iam`](https://github.com/reidlai/ferrous-iam) | Identity & Access Management container engine (Kanidm pure-Rust IdP, OIDC/OAuth2). Platform personas (`seed-rbac.json`, `seed-m2m.json`) and TLS certificates are decoupled into and managed by `ferrous-cx`. | Pure-Rust Kanidm / Docker |
 | **5** | **`ferrous-vectordb`** | [`reidlai/ferrous-vectordb`](https://github.com/reidlai/ferrous-vectordb) | Qdrant vector database indexing enterprise SOPs & support transcripts | Qdrant Vector DB / FastEmbed |
 | **6** | **`ferrous-cqrses`** | [`reidlai/ferrous-cqrses`](https://github.com/reidlai/ferrous-cqrses) | Dual-Role CQRS Library (`lib.rs`) & Command Handler Service ($20 Credit Cap) | Pure-Rust Library Crate & Service |
 | **7** | **`ferrous-api`** | [`reidlai/ferrous-api`](https://github.com/reidlai/ferrous-api) | Contract-First Axum API Service (Goa DSL, rust-axum, in-process DataFusion <3ms SQL, Axum SSE) | Goa v3 / Axum / DataFusion |
@@ -269,7 +269,7 @@ ferrous-cx/ (This Repository - Core Public Repository: demo config, runtime stac
 ### Prerequisites
 * **Docker & Docker Compose:** v2.29+
 * **PowerShell 7+** (Windows) or **Bash** (macOS/Linux)
-* **Rust 1.80+** (if building or contributing to component crates)
+* **Rust 1.80+** (required for `setup-topics`, `setup-iam`, and `stream-replay-rs`)
 
 ### 1. Clone the Public Repository
 ```bash
@@ -277,10 +277,13 @@ git clone --recurse-submodules https://github.com/reidlai/ferrous-cx.git
 cd ferrous-cx
 ```
 
-### 2. Configure Environment
+### 2. Configure Environment & Generate Dev TLS Certificates
 ```bash
 cp .env.example .env
 cp docker/.env.example docker/.env
+
+# Generate self-signed Dev TLS certificates for Kanidm (pure Rust rcgen)
+cargo run --bin setup-iam -- --generate-certs
 ```
 
 ### 3. Launch the Unified Runtime Stack
@@ -289,16 +292,19 @@ docker compose up -d
 docker compose ps
 ```
 
-### 4. Provision Apache Iggy Topics & Consumer Groups
-The single topic registry provisioner idempotently creates all streams, topics, and consumer groups based on `contracts/topics.yml`:
+### 4. Provision Apache Iggy Topics & IAM Personas
+The automated Cargo provisioners idempotently initialize all streams, topics, consumer groups, and IAM personas:
 ```bash
 # Cross-Platform (Cargo)
-cargo run --bin setup-topics -- --dry-run   # Conformance audit & schema check
+cargo run --bin setup-topics -- --dry-run   # Topic registry conformance audit
 cargo run --bin setup-topics               # Live stream & topic provisioning
 
+cargo run --bin setup-iam -- --dry-run      # IAM persona & M2M audit
+cargo run --bin setup-iam                  # Idempotent IAM setup
+
 # Optional shell wrappers:
-# PowerShell: powershell -ExecutionPolicy Bypass -File scripts/setup-topics.ps1
-# Bash:       bash scripts/setup-topics.sh
+# Linux/macOS:        ./scripts/setup-topics.sh && ./scripts/setup-iam.sh
+# Windows PowerShell: .\scripts\setup-topics.ps1; .\scripts\setup-iam.ps1
 ```
 
 ### 5. Replay Olist Traffic
@@ -359,9 +365,8 @@ This walk-through is carried over from the former `ferrous-docker` README and ad
 | Tool | Version | Used for |
 | :--- | :--- | :--- |
 | Docker + Compose | `v2.29+` | Building images and running the stack |
-| Rust | `1.80+` | Installing `stream-replay-rs` (`cargo install stream-replay-rs`, or `cargo install --git https://github.com/reidlai/stream-replay-rs` until the crate is published) |
-| `openssl` | any | Generating Kanidm dev TLS certificates (bundled with Git for Windows) |
-| Python | `3.9+` | `ferrous-streaming` provisioning scripts |
+| Rust | `1.80+` | Building `setup-topics`, `setup-iam`, and installing `stream-replay-rs` |
+| Python | `3.9+` | `ferrous-streaming` verification & tooling scripts |
 
 Make sure the submodules are checked out (`git submodule update --init --recursive`).
 
@@ -383,13 +388,21 @@ docker build -t ferrous-iam:latest ferrous-iam
 
 ### 2. Generate Dev TLS Certificates
 
-Kanidm will not boot without TLS material. Generate self-signed certs and place them where the compose file mounts them (`docker/config/certs/chain.pem` and `key.pem`):
+Kanidm requires valid TLS certificates to boot. Generate self-signed development certificates with required SANs (`localhost`, `ferrous-iam`, `ferrouscx.local`, `127.0.0.1`, `::1`) in pure Rust using `rcgen` (zero host `openssl` CLI or Python dependencies):
 
 ```bash
-./ferrous-iam/scripts/generate-dev-certs.sh      # Windows: powershell -ExecutionPolicy Bypass -File ferrous-iam/scripts/generate-dev-certs.ps1
-mkdir -p docker/config/certs
-cp ferrous-iam/config/certs/chain.pem ferrous-iam/config/certs/key.pem docker/config/certs/
+# Cross-Platform (Cargo)
+cargo run --bin setup-iam -- --generate-certs
+
+# Force overwrite existing certificates if needed:
+cargo run --bin setup-iam -- --generate-certs --force
+
+# Optional shell wrappers:
+# Linux/macOS:        ./scripts/setup-iam.sh --generate-certs
+# Windows PowerShell: .\scripts\setup-iam.ps1 -GenerateCerts
 ```
+
+Certificates are generated directly into `config/iam/certs/` (`chain.pem` and `key.pem`), where Docker Compose automatically mounts them into the Kanidm container.
 
 ### 3. Create `docker/.env`
 
@@ -413,27 +426,24 @@ cd ..
 | Arroyo console | `http://localhost:5115` |
 | DataFusion (Flight SQL / HTTP) | `localhost:50051` / `localhost:8085` |
 
-### 5. Provision Topics and Pipelines
+### 5. Provision Topics, Consumer Groups & IAM Personas
 
-`ferrous-cx` owns the FerrousCX topic setup. Load the same Iggy secret that is in `docker/.env`, then run the `ferrous-streaming` provisioners to create stream `orders` with topics `intake` and `consolidated` and the consumer groups, then deploy the Arroyo pipelines:
+`ferrous-cx` owns the platform topic registry and IAM persona configurations. Use the native cross-platform Cargo tools to audit and idempotently provision topics, consumer groups, and IAM personas:
 
 ```bash
-export IGGY_HTTP_JWT_ENCODING_SECRET=$(grep '^IGGY_HTTP_JWT_ENCODING_SECRET=' docker/.env | cut -d= -f2-)
-cd ferrous-streaming
-./scripts/provision-topics.sh
-./scripts/provision-consumer-groups.sh
-./scripts/provision-arroyo.sh
-./scripts/run-migrations.sh
-cd ..
+# Cross-Platform (Cargo)
+cargo run --bin setup-topics -- --dry-run   # Conformance audit & schema check
+cargo run --bin setup-topics               # Live stream & topic provisioning
+
+cargo run --bin setup-iam -- --dry-run      # IAM persona & M2M audit
+cargo run --bin setup-iam                  # Idempotent IAM setup
+
+# Optional shell wrappers:
+# Linux/macOS:        ./scripts/setup-topics.sh && ./scripts/setup-iam.sh
+# Windows PowerShell: .\scripts\setup-topics.ps1; .\scripts\setup-iam.ps1
 ```
 
-PowerShell users run the `.ps1` twin of each script after setting `$env:IGGY_HTTP_JWT_ENCODING_SECRET`. The scripts are idempotent. The consolidation adds the replay topic `olist/orders_stream` and Arroyo Job 3 (`cg-arroyo-olist`) to this set; those scripts are still to be written.
-
-> [!WARNING]
-> **Known state against the Iggy 0.9.0 image the stack builds** (`Dockerfile.iggy` pulls `apache/iggy:latest`, which is not pinned):
-> - `provision-topics` and `provision-consumer-groups` work only with the `ferrous-streaming` fixes that change the admin token's user id from `1` to `0` (Iggy 0.9.0 treats `1` as an unknown user and answers `403`), add the now-required `compression_algorithm` / `max_topic_size` topic fields, base64-encode the partition id, and address streams and topics by name. Without those fixes they stop at `403 unauthorized`.
-> - `provision-arroyo` and `run-migrations` do **not** work: Arroyo reads from Iggy through a Kafka connector on port `9092`, and Iggy 0.9.0 does not serve one.
-> - The `ferrous-streaming` unit tests use mock brokers written for the older API, so they report additional failures after those fixes.
+Both tools support `--dry-run` for non-destructive pre-flight auditing and schema validation against `contracts/topics.yml` and `config/iam/`. They connect directly to running container ports (`http://localhost:3000` for Iggy, `https://localhost:8443` for Kanidm) and are fully idempotent.
 
 ### 6. Run `stream-replay-rs`
 
