@@ -280,7 +280,7 @@ services:
       start_period: 5s
 
   # 8. Iggy-Kafka Bridge Overrides (AD-29 pinned image tag)
-  bridge:
+  iggy-kafka-bridge:
     image: ${BRIDGE_IMAGE:-iggy-kafka-bridge:0f8d788}
 
   # 9. Ephemeral In-Memory Jaeger All-In-One Container (Story 12.2, AD-23)
