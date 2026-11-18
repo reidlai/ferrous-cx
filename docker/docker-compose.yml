@@ -283,9 +283,6 @@ services:
   bridge:
     image: ${BRIDGE_IMAGE:-iggy-kafka-bridge:0f8d788}
 
-  bridge-host:
-    image: ${BRIDGE_IMAGE:-iggy-kafka-bridge:0f8d788}
-
   # 9. Ephemeral In-Memory Jaeger All-In-One Container (Story 12.2, AD-23)
   jaeger:
     image: jaegertracing/jaeger:2.3.0
