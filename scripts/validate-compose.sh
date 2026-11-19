@@ -112,6 +112,7 @@ checks = [
     (r"(?ms)ferrous-api:.*?iggy-broker:\s*condition:\s*service_healthy", "ferrous-api depends on iggy-broker"),
     (r"(?ms)ferrous-api:.*?ferrous-iam:\s*condition:\s*service_healthy", "ferrous-api depends on ferrous-iam"),
     (r"(?ms)command-handler:.*?iggy-broker:\s*condition:\s*service_healthy", "command-handler depends on iggy-broker"),
+    (r"(?ms)command-handler:.*?sierradb:\s*condition:\s*service_healthy", "command-handler depends on sierradb"),
     (r"(?ms)ferrous-agent:.*?ferrous-api:\s*condition:\s*service_healthy", "ferrous-agent depends on ferrous-api"),
 ]
 

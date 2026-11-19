@@ -83,6 +83,9 @@ if ($ComposeContent -notmatch "(?ms)ferrous-api:.*?ferrous-iam:\s*condition:\s*s
 if ($ComposeContent -notmatch "(?ms)command-handler:.*?iggy-broker:\s*condition:\s*service_healthy") {
     throw "command-handler must depend on iggy-broker (service_healthy)"
 }
+if ($ComposeContent -notmatch "(?ms)command-handler:.*?sierradb:\s*condition:\s*service_healthy") {
+    throw "command-handler must depend on sierradb (service_healthy)"
+}
 Write-Host "  [OK] Healthcheck graph enforces deterministic startup sequence." -ForegroundColor Green
 
 Write-Host "`n==========================================================" -ForegroundColor Cyan

@@ -111,6 +111,28 @@ services:
     cap_drop:
       - ALL
 
+  # 2.5 Pure-Rust Distributed Event Store (SierraDB)
+  sierradb:
+    image: tqwewe/sierradb:latest
+    container_name: ferrous-sierradb
+    restart: unless-stopped
+    ports:
+      - "${PORT_SIERRADB:-9090}:9090"
+    volumes:
+      - sierradb_data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/127.0.0.1/9090' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
   # 3. CQRS-ES Command Handler & Aggregate Root (Day-0 Defense)
   command-handler:
     build:
@@ -136,8 +158,11 @@ services:
       - TOPIC_ORDERS_INTAKE=intake
       - TOPIC_ORDERS_CONSOLIDATED=consolidated
       - CONSUMER_GROUP=cg-cmd-handler
+      - SIERRADB_URL=${SIERRADB_URL:-redis://sierradb:9090}
     depends_on:
       iggy-broker:
+        condition: service_healthy
+      sierradb:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "/command_handler", "--healthcheck"]
@@ -362,6 +387,8 @@ volumes:
     name: ferrous_iggy_data
   delta_data:
     name: ferrous_delta_data
+  sierradb_data:
+    name: ferrous_sierradb_data
 
 networks:
   default:
