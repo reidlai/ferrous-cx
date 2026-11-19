@@ -25,18 +25,14 @@ if ($EnvExample -match "BRIDGE_IMAGE=.*:latest") {
 Write-Host "  [OK] BRIDGE_IMAGE correctly pinned to immutable short SHA." -ForegroundColor Green
 
 # 2. Validate Compose Syntax via docker compose config
-Write-Host "`n[2/4] Validating Docker Compose syntax & include directives (AD-26)..." -ForegroundColor Green
-$dockerComposeText = Get-Content "$ProjectRoot/docker/docker-compose.yml" -Raw
-$rootComposeText = Get-Content "$ProjectRoot/docker-compose.yml" -Raw
+Write-Host "`n[2/4] Validating Docker Compose syntax (AD-26)..." -ForegroundColor Green
+$ComposeContent = Get-Content "$ProjectRoot/docker-compose.yml" -Raw
 
-if ($dockerComposeText -notmatch "(?m)^name:\s*ferrous-cx") {
-    throw "docker/docker-compose.yml is missing top-level 'name: ferrous-cx'"
-}
-if ($rootComposeText -notmatch "(?m)^name:\s*ferrous-cx") {
-    throw "Root docker-compose.yml is missing top-level 'name: ferrous-cx'"
+if ($ComposeContent -notmatch "(?m)^name:\s*ferrous-cx") {
+    throw "docker-compose.yml is missing top-level 'name: ferrous-cx'"
 }
 
-Push-Location "$ProjectRoot/docker"
+Push-Location "$ProjectRoot"
 try {
     $configYaml = docker compose config
     if ($LASTEXITCODE -ne 0) {
@@ -45,22 +41,10 @@ try {
 } finally {
     Pop-Location
 }
-Write-Host "  [OK] docker/docker-compose.yml passed Compose v2 validation." -ForegroundColor Green
-
-Push-Location "$ProjectRoot"
-try {
-    $rootConfig = docker compose config
-    if ($LASTEXITCODE -ne 0) {
-        throw "Root docker-compose.yml config failed with exit code $LASTEXITCODE"
-    }
-} finally {
-    Pop-Location
-}
-Write-Host "  [OK] Root docker-compose.yml wrapper passed Compose v2 validation." -ForegroundColor Green
+Write-Host "  [OK] docker-compose.yml passed Compose v2 validation." -ForegroundColor Green
 
 # 3. Validate Day-0 Hardened Runtime Defense Constraints (AD-24)
 Write-Host "`n[3/4] Auditing Day-0 kernel hardening constraints (AD-24)..." -ForegroundColor Green
-$ComposeContent = Get-Content "$ProjectRoot/docker/docker-compose.yml" -Raw
 
 $requiredServices = @("command-handler", "ferrous-api", "ferrous-agent", "ferrous-frontend", "ferrous-reverseproxy")
 foreach ($svc in $requiredServices) {

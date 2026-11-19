@@ -53,22 +53,15 @@ echo "  [OK] BRIDGE_IMAGE correctly pinned to immutable short SHA."
 
 # 2. Validate Compose Syntax via docker compose config
 echo ""
-echo "[2/4] Validating Docker Compose syntax & include directives (AD-26)..."
+echo "[2/4] Validating Docker Compose syntax (AD-26)..."
 
-if ! grep -qE "^name:\s*ferrous-cx" "${PROJECT_ROOT}/docker/docker-compose.yml"; then
-    echo "ERROR: docker/docker-compose.yml is missing top-level 'name: ferrous-cx'"
-    exit 1
-fi
 if ! grep -qE "^name:\s*ferrous-cx" "${PROJECT_ROOT}/docker-compose.yml"; then
-    echo "ERROR: Root docker-compose.yml is missing top-level 'name: ferrous-cx'"
+    echo "ERROR: docker-compose.yml is missing top-level 'name: ferrous-cx'"
     exit 1
 fi
-
-(cd "${PROJECT_ROOT}/docker" && "$DOCKER_CMD" compose config >/dev/null)
-echo "  [OK] docker/docker-compose.yml passed Compose v2 validation."
 
 (cd "${PROJECT_ROOT}" && "$DOCKER_CMD" compose config >/dev/null)
-echo "  [OK] Root docker-compose.yml wrapper passed Compose v2 validation."
+echo "  [OK] docker-compose.yml passed Compose v2 validation."
 
 # 3. Validate Day-0 Hardened Runtime Defense Constraints (AD-24)
 echo ""
@@ -76,7 +69,7 @@ echo "[3/4] Auditing Day-0 kernel hardening constraints (AD-24)..."
 "$PYTHON_CMD" - <<EOF
 import re, sys
 
-with open("${PROJECT_ROOT}/docker/docker-compose.yml", "r", encoding="utf-8") as f:
+with open("${PROJECT_ROOT}/docker-compose.yml", "r", encoding="utf-8") as f:
     content = f.read()
 
 required_services = ["command-handler", "ferrous-api", "ferrous-agent", "ferrous-frontend", "ferrous-reverseproxy"]
@@ -108,7 +101,7 @@ echo "[4/4] Auditing Healthcheck Graph Dependency Sequence..."
 "$PYTHON_CMD" - <<EOF
 import re, sys
 
-with open("${PROJECT_ROOT}/docker/docker-compose.yml", "r", encoding="utf-8") as f:
+with open("${PROJECT_ROOT}/docker-compose.yml", "r", encoding="utf-8") as f:
     content = f.read()
 
 checks = [

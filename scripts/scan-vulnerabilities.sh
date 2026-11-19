@@ -44,7 +44,7 @@ if [ -z "$TRIVY_CMD" ]; then
         echo "ERROR: Qdrant image is not pinned to audited release v1.12.0 in ferrous-vectordb/Dockerfile"
         exit 1
     fi
-    if ! grep -qE "jaegertracing/jaeger:2\.3\.0" "${PROJECT_ROOT}/docker/docker-compose.yml"; then
+    if ! grep -qE "jaegertracing/jaeger:2\.3\.0" "${PROJECT_ROOT}/docker-compose.yml"; then
         echo "ERROR: Jaeger image is not pinned to audited release 2.3.0 in docker-compose.yml"
         exit 1
     fi
@@ -60,9 +60,9 @@ echo "  [OK] Found Trivy CLI ($TRIVY_CMD)."
 
 echo ""
 echo "[3/3] Running Trivy config & image scans (Severity: ${SEVERITY})..."
-echo "  - Scanning docker/docker-compose.yml for security misconfigurations..."
-"$TRIVY_CMD" config "${PROJECT_ROOT}/docker/docker-compose.yml" --severity "$SEVERITY" --exit-code 1
-echo "  [OK] docker/docker-compose.yml passed Trivy security audit."
+echo "  - Scanning docker-compose.yml for security misconfigurations..."
+"$TRIVY_CMD" config "${PROJECT_ROOT}/docker-compose.yml" --severity "$SEVERITY" --exit-code 1
+echo "  [OK] docker-compose.yml passed Trivy security audit."
 
 for img in "${BASE_IMAGES[@]}"; do
     echo "  - Scanning image '${img}' for ${SEVERITY} vulnerabilities..."

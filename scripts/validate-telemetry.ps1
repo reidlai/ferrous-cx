@@ -44,7 +44,7 @@ foreach ($file in $envFiles) {
 
 # 2. Validate Jaeger Service Definition in Compose
 Write-Host "`n[2/5] Validating Jaeger container definition & ephemeral memory config..." -ForegroundColor Green
-$ComposeContent = Get-Content "$ProjectRoot/docker/docker-compose.yml" -Raw
+$ComposeContent = Get-Content "$ProjectRoot/docker-compose.yml" -Raw
 
 if ($ComposeContent -match "(?ms)^\s{2}jaeger:.*?(?=^[a-zA-Z]|^\s{2}[a-zA-Z]|\Z)") {
     $jaegerBlock = $Matches[0]
@@ -117,25 +117,16 @@ foreach ($svc in $otelServices) {
 
 # 5. Validate Compose Syntax via docker compose config
 Write-Host "`n[5/5] Validating Docker Compose syntax with Jaeger..." -ForegroundColor Green
-Push-Location "$ProjectRoot/docker"
-try {
-    $null = docker compose config
-    if ($LASTEXITCODE -ne 0) {
-        throw "docker compose config failed for docker/docker-compose.yml"
-    }
-} finally {
-    Pop-Location
-}
 Push-Location "$ProjectRoot"
 try {
     $null = docker compose config
     if ($LASTEXITCODE -ne 0) {
-        throw "docker compose config failed for root docker-compose.yml"
+        throw "docker compose config failed for docker-compose.yml"
     }
 } finally {
     Pop-Location
 }
-Write-Host "  [OK] Compose topology with Jaeger passes validation cleanly on both manifests." -ForegroundColor Green
+Write-Host "  [OK] Compose topology with Jaeger passes validation cleanly." -ForegroundColor Green
 
 Write-Host "`n==========================================================" -ForegroundColor Cyan
 Write-Host "  [OK] OPENTELEMETRY & JAEGER AUDIT COMPLETED CLEANLY!    " -ForegroundColor Green

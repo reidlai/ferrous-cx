@@ -37,7 +37,7 @@ $trivyCmd = if (Get-Command trivy -ErrorAction SilentlyContinue) { "trivy" } els
 
 if (-not $trivyCmd) {
     Write-Host "  [INFO] Trivy CLI not installed locally. Verifying manifest base image security pins..." -ForegroundColor Yellow
-    $composeText = Get-Content "$ProjectRoot/docker/docker-compose.yml" -Raw
+    $composeText = Get-Content "$ProjectRoot/docker-compose.yml" -Raw
 
     # Assert pinned versions on external images
     if (Test-Path "$ProjectRoot/../ferrous-iam/Dockerfile") {
@@ -68,10 +68,10 @@ Write-Host "  [OK] Found Trivy CLI ($trivyCmd)." -ForegroundColor Green
 Write-Host "`n[3/3] Running Trivy config & image scans (Severity: $Severity)..." -ForegroundColor Green
 
 # Scan Compose Config for Misconfigurations
-Write-Host "  - Scanning docker/docker-compose.yml for security misconfigurations..." -ForegroundColor White
-& $trivyCmd config "$ProjectRoot/docker/docker-compose.yml" --severity $Severity --exit-code 1
+Write-Host "  - Scanning docker-compose.yml for security misconfigurations..." -ForegroundColor White
+& $trivyCmd config "$ProjectRoot/docker-compose.yml" --severity $Severity --exit-code 1
 if ($LASTEXITCODE -ne 0 -and $FailOnIssue) {
-    throw "Trivy detected misconfigurations in docker/docker-compose.yml"
+    throw "Trivy detected misconfigurations in docker-compose.yml"
 }
 Write-Host "  [OK] docker/docker-compose.yml passed Trivy security audit." -ForegroundColor Green
 

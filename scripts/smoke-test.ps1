@@ -47,7 +47,7 @@ $dockerCmd = if (Get-Command docker -ErrorAction SilentlyContinue) { "docker" } 
 $stackRunning = $false
 if ($dockerCmd) {
     try {
-        $runningContainers = & $dockerCmd compose -f "$ProjectRoot/docker/docker-compose.yml" ps --status running -q 2>$null
+        $runningContainers = & $dockerCmd compose -f "$ProjectRoot/docker-compose.yml" ps --status running -q 2>$null
         $runningList = @($runningContainers | Where-Object { $_ -match '\S' })
         if ($runningList.Count -gt 0) {
             $stackRunning = $true

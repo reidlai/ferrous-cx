@@ -75,7 +75,7 @@ echo "[2/5] Validating Jaeger container definition & Day-0 hardening..."
 "$PYTHON_CMD" - <<EOF
 import re, sys
 
-with open("${PROJECT_ROOT}/docker/docker-compose.yml", "r", encoding="utf-8") as f:
+with open("${PROJECT_ROOT}/docker-compose.yml", "r", encoding="utf-8") as f:
     content = f.read()
 
 pattern = r"(?ms)^\s{2}jaeger:.*?(?=^[a-zA-Z]|^\s{2}[a-zA-Z]|\Z)"
@@ -119,7 +119,7 @@ echo "[3/5] Validating OTel environment propagation across application services.
 "$PYTHON_CMD" - <<EOF
 import re, sys
 
-with open("${PROJECT_ROOT}/docker/docker-compose.yml", "r", encoding="utf-8") as f:
+with open("${PROJECT_ROOT}/docker-compose.yml", "r", encoding="utf-8") as f:
     content = f.read()
 
 services = ["ferrous-api", "ferrous-agent", "ferrous-reverseproxy"]
@@ -140,11 +140,8 @@ EOF
 # 4. Check Compose Syntax
 echo ""
 echo "[4/5] Validating Docker Compose syntax with Jaeger..."
-(cd "${PROJECT_ROOT}/docker" && "$DOCKER_CMD" compose config >/dev/null)
-echo "  [OK] Compose topology docker/docker-compose.yml passes validation cleanly."
-
 (cd "${PROJECT_ROOT}" && "$DOCKER_CMD" compose config >/dev/null)
-echo "  [OK] Root docker-compose.yml wrapper passes validation cleanly."
+echo "  [OK] Compose topology docker-compose.yml passes validation cleanly."
 
 echo ""
 echo "=========================================================="

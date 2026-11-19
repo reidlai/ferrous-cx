@@ -44,7 +44,7 @@ fi
 
 STACK_RUNNING=false
 if [ -n "$DOCKER_CMD" ]; then
-    RUNNING_OUTPUT=$("$DOCKER_CMD" compose -f "${PROJECT_ROOT}/docker/docker-compose.yml" ps --status running -q 2>/dev/null || true)
+    RUNNING_OUTPUT=$("$DOCKER_CMD" compose -f "${PROJECT_ROOT}/docker-compose.yml" ps --status running -q 2>/dev/null || true)
     if [ -n "$RUNNING_OUTPUT" ]; then
         STACK_RUNNING=true
         RUNNING_COUNT=$(echo "$RUNNING_OUTPUT" | wc -l | tr -d ' ')
