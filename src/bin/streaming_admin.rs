@@ -4,7 +4,7 @@
 use clap::{Parser, Subcommand};
 use ferrous_cx::admin::{
     run_all, run_init_delta_storage, run_provision_consumer_groups, run_provision_topics,
-    run_verify_broker, DEFAULT_IGGY_URL,
+    run_validate_connectors, run_verify_broker, DEFAULT_IGGY_URL,
 };
 use std::path::PathBuf;
 
@@ -90,7 +90,22 @@ pub enum Command {
         dry_run: bool,
     },
 
-    /// Execute the full streaming setup sequence in order (Steps 2 -> 3 -> 4 -> 5)
+    /// Validate Apache Iggy delta_sink connector configuration and target tables (Step 6)
+    ValidateConnectors {
+        /// Path to connector configuration file
+        #[arg(short, long, default_value = "config/streaming/connectors/delta_sink.toml")]
+        config: PathBuf,
+
+        /// Path to base Delta Lake storage directory
+        #[arg(long, default_value = "data/delta")]
+        delta_dir: PathBuf,
+
+        /// Run in dry-run conformance mode without disk checks
+        #[arg(short, long)]
+        dry_run: bool,
+    },
+
+    /// Execute the full streaming setup sequence in order (Steps 2 -> 3 -> 4 -> 5 -> 6)
     All {
         /// Apache Iggy HTTP URL
         #[arg(long, visible_alias = "url", env = "IGGY_HTTP_URL", default_value = DEFAULT_IGGY_URL)]
@@ -107,6 +122,10 @@ pub enum Command {
         /// Path to base Delta Lake storage directory
         #[arg(long, default_value = "data/delta")]
         delta_dir: PathBuf,
+
+        /// Optional path to connector configuration file (delta_sink.toml)
+        #[arg(short, long)]
+        config: Option<PathBuf>,
 
         /// Run in dry-run conformance mode
         #[arg(short, long)]
@@ -149,14 +168,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         } => {
             run_init_delta_storage(&delta_dir, dry_run).await?;
         }
+        Command::ValidateConnectors {
+            config,
+            delta_dir,
+            dry_run,
+        } => {
+            run_validate_connectors(&config, Some(&delta_dir), dry_run).await?;
+        }
         Command::All {
             iggy_url,
             username,
             password,
             delta_dir,
+            config,
             dry_run,
         } => {
-            run_all(&iggy_url, &username, &password, &delta_dir, dry_run).await?;
+            run_all(
+                &iggy_url,
+                &username,
+                &password,
+                &delta_dir,
+                config.as_deref(),
+                dry_run,
+            )
+            .await?;
         }
     }
 

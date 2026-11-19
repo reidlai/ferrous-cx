@@ -8,6 +8,8 @@ pub const DEFAULT_STREAM_NAME: &str = "orders";
 pub const DEFAULT_STREAM_ID: u32 = 1;
 pub const BENCHMARK_STREAM_NAME: &str = "benchmark";
 pub const BENCHMARK_STREAM_ID: u32 = 2;
+pub const OLIST_STREAM_NAME: &str = "olist";
+pub const OLIST_STREAM_ID: u32 = 3;
 
 /// Topic specification matching contracts/topics.yml
 #[derive(Debug, Clone)]
@@ -38,6 +40,13 @@ pub const BENCHMARK_TOPICS: &[TopicSpec] = &[TopicSpec {
     name: "hpc_mqbench",
     partitions: 4,
     description: "HPC-MQBench qualification-first synthetic benchmark stream (immediate fsync)",
+}];
+
+pub const OLIST_TOPICS: &[TopicSpec] = &[TopicSpec {
+    id: 1,
+    name: "orders_stream",
+    partitions: 4,
+    description: "Olist Brazilian E-Commerce historical order replay stream (immediate fsync)",
 }];
 
 /// Consumer group specification
@@ -83,6 +92,14 @@ pub const CONSUMER_GROUPS: &[ConsumerGroupSpec] = &[
         group_id: 1,
         name: "cg-arroyo-benchmark",
         description: "HPC-MQBench benchmark consumer group",
+    },
+    ConsumerGroupSpec {
+        stream_id: 3,
+        topic_id: 1,
+        topic_name: "orders_stream",
+        group_id: 1,
+        name: "cg-arroyo-olist",
+        description: "Olist historical replay consumer group",
     },
 ];
 
@@ -136,6 +153,21 @@ pub const TABLES: &[TableInitSpec] = &[
             ("payload_size_bytes", "long", false),
             ("data", "string", false),
             ("arroyo_ingest_timestamp", "timestamp", false),
+        ],
+    },
+    TableInitSpec {
+        name: "olist_historical_ingestion",
+        delta_table_name: "olist_orders",
+        consumer_group: "cg-arroyo-olist",
+        schema_fields: &[
+            ("order_id", "string", false),
+            ("customer_id", "string", false),
+            ("order_status", "string", false),
+            ("order_purchase_timestamp", "timestamp", false),
+            ("order_approved_at", "timestamp", true),
+            ("order_delivered_carrier_date", "timestamp", true),
+            ("order_delivered_customer_date", "timestamp", true),
+            ("order_estimated_delivery_date", "timestamp", false),
         ],
     },
 ];
@@ -260,6 +292,17 @@ pub async fn run_provision_topics(
             );
             println!("          Description: {}", topic.description);
         }
+        println!(
+            "  [AUDIT] Validated stream '{}' (id: {}) specification.",
+            OLIST_STREAM_NAME, OLIST_STREAM_ID
+        );
+        for topic in OLIST_TOPICS {
+            println!(
+                "  [AUDIT] Validated topic '{}' (id: {}, partitions: {}, fsync: immediate)",
+                topic.name, topic.id, topic.partitions
+            );
+            println!("          Description: {}", topic.description);
+        }
         println!("\n  [OK] Topics and partition durability verified in dry-run mode.");
         return Ok(());
     }
@@ -278,6 +321,7 @@ pub async fn run_provision_topics(
     for (stream_id, stream_name, topics) in [
         (DEFAULT_STREAM_ID, DEFAULT_STREAM_NAME, STREAMING_TOPICS),
         (BENCHMARK_STREAM_ID, BENCHMARK_STREAM_NAME, BENCHMARK_TOPICS),
+        (OLIST_STREAM_ID, OLIST_STREAM_NAME, OLIST_TOPICS),
     ] {
         println!("\n  [*] Ensuring stream '{}' (id: {})...", stream_name, stream_id);
         let stream_payload = serde_json::json!({
@@ -396,10 +440,11 @@ pub async fn run_provision_consumer_groups(
     let clean_url = iggy_url.trim_end_matches('/');
 
     for cg in CONSUMER_GROUPS {
-        let stream_name = if cg.stream_id == DEFAULT_STREAM_ID {
-            DEFAULT_STREAM_NAME
-        } else {
-            BENCHMARK_STREAM_NAME
+        let stream_name = match cg.stream_id {
+            DEFAULT_STREAM_ID => DEFAULT_STREAM_NAME,
+            BENCHMARK_STREAM_ID => BENCHMARK_STREAM_NAME,
+            OLIST_STREAM_ID => OLIST_STREAM_NAME,
+            _ => "unknown",
         };
 
         println!(
@@ -464,7 +509,7 @@ pub async fn run_verify_broker(
     if dry_run {
         println!("\n  [INFO] Running in --dry-run mode (skipping network probes).");
         println!("  [AUDIT] Validated Apache Iggy health probe (port 3000/ping)");
-        println!("  [AUDIT] Validated required consumer group attachments: cg-arroyo-raw, cg-arroyo-state, cg-cmd-handler");
+        println!("  [AUDIT] Validated required consumer group attachments: cg-arroyo-raw, cg-arroyo-state, cg-cmd-handler, cg-arroyo-benchmark, cg-arroyo-olist");
         println!("\n  [OK] Apache Iggy broker health and consumer groups verified in dry-run mode.");
         return Ok(());
     }
@@ -486,6 +531,7 @@ pub async fn run_verify_broker(
         (DEFAULT_STREAM_NAME, "intake", "cg-cmd-handler"),
         (DEFAULT_STREAM_NAME, "consolidated", "cg-arroyo-state"),
         (BENCHMARK_STREAM_NAME, "hpc_mqbench", "cg-arroyo-benchmark"),
+        (OLIST_STREAM_NAME, "orders_stream", "cg-arroyo-olist"),
     ];
     let clean_url = iggy_url.trim_end_matches('/');
     for (s_name, t_name, cg_name) in groups_to_verify {
@@ -514,9 +560,32 @@ pub async fn run_verify_broker(
     Ok(())
 }
 
-/// Fallback resolver for `--delta-dir` to locate `data/delta`
+/// Fallback resolver for `--delta-dir` to locate `data/delta` across workspaces
 pub fn resolve_delta_dir(delta_dir: &Path) -> PathBuf {
-    delta_dir.to_path_buf()
+    if delta_dir.exists() {
+        delta_dir.to_path_buf()
+    } else {
+        let in_submodule = Path::new("ferrous-cx").join(delta_dir);
+        if in_submodule.exists() {
+            in_submodule
+        } else {
+            delta_dir.to_path_buf()
+        }
+    }
+}
+
+/// Fallback resolver for `--config` to locate `delta_sink.toml` across workspaces
+pub fn resolve_connector_config_path(config_path: &Path) -> PathBuf {
+    if config_path.exists() {
+        config_path.to_path_buf()
+    } else {
+        let in_submodule = Path::new("ferrous-cx").join(config_path);
+        if in_submodule.exists() {
+            in_submodule
+        } else {
+            config_path.to_path_buf()
+        }
+    }
 }
 
 /// Generate RFC-compliant Delta Lake 00000000000000000000.json commit log
@@ -592,7 +661,7 @@ pub fn generate_delta_log_zero(
     Ok(output)
 }
 
-/// Initialize Delta Lake sink storage directories
+/// Initialize Delta Lake sink storage directories with atomic log generation
 pub fn init_delta_storage(delta_base_dir: &Path) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     for spec in TABLES {
         let table_dir = delta_base_dir.join(spec.delta_table_name);
@@ -600,9 +669,18 @@ pub fn init_delta_storage(delta_base_dir: &Path) -> Result<(), Box<dyn std::erro
         std::fs::create_dir_all(&log_dir)?;
 
         let log_zero_path = log_dir.join("00000000000000000000.json");
-        if !log_zero_path.exists() {
+        let is_uninitialized = if log_zero_path.exists() {
+            let metadata = std::fs::metadata(&log_zero_path)?;
+            metadata.len() == 0
+        } else {
+            true
+        };
+
+        if is_uninitialized {
             let log_zero_content = generate_delta_log_zero(spec.delta_table_name, spec.schema_fields)?;
-            std::fs::write(&log_zero_path, log_zero_content)?;
+            let tmp_path = log_dir.join(format!(".00000000000000000000.json.{}.tmp", uuid::Uuid::new_v4()));
+            std::fs::write(&tmp_path, log_zero_content)?;
+            std::fs::rename(&tmp_path, &log_zero_path)?;
             println!(
                 "      [CREATED] Delta Lake schema initialized: {}",
                 log_zero_path.display()
@@ -647,16 +725,17 @@ pub async fn run_init_delta_storage(
     Ok(())
 }
 
-/// Run all Steps (2, 3, 4, 5) in sequence
+/// Run all Steps (2, 3, 4, 5, 6) in sequence
 pub async fn run_all(
     iggy_url: &str,
     username: &str,
     password: &str,
     delta_dir: &Path,
+    connector_cfg_override: Option<&Path>,
     dry_run: bool,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("##################################################################");
-    println!("  [Full Setup] Executing Steps 2 through 5 in order...            ");
+    println!("  [Full Setup] Executing Steps 2 through 6 in order...            ");
     println!("##################################################################\n");
 
     run_provision_topics(iggy_url, username, password, dry_run).await?;
@@ -665,11 +744,262 @@ pub async fn run_all(
     println!();
     run_verify_broker(iggy_url, username, password, dry_run).await?;
     println!();
-    run_init_delta_storage(delta_dir, dry_run).await?;
+    let resolved_delta_dir = resolve_delta_dir(delta_dir);
+    run_init_delta_storage(&resolved_delta_dir, dry_run).await?;
+
+    let default_cfg = Path::new("config/streaming/connectors/delta_sink.toml");
+    let target_cfg = connector_cfg_override.unwrap_or(default_cfg);
+    let resolved_cfg = resolve_connector_config_path(target_cfg);
+
+    if resolved_cfg.exists() {
+        println!();
+        run_validate_connectors(&resolved_cfg, Some(&resolved_delta_dir), dry_run).await?;
+    } else {
+        println!(
+            "\n  [WARN] Connector config not found at {:?}, skipping Step 6 validation.",
+            resolved_cfg
+        );
+    }
 
     println!("\n##################################################################");
     println!("  [SUCCESS] All platform streaming steps completed successfully!  ");
     println!("##################################################################");
+    Ok(())
+}
+
+/// Apache Iggy connector header specification
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
+pub struct ConnectorHeader {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub connector_type: String,
+    pub plugin: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+/// Apache Iggy broker connection configuration for connector runtime
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
+pub struct IggyConnectionConfig {
+    pub server_address: String,
+    pub username: String,
+    pub password: String,
+}
+
+/// Delta Lake sink definition for Apache Iggy `delta_sink` plugin
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
+pub struct DeltaSinkDefinition {
+    pub name: String,
+    pub stream: String,
+    pub topic: String,
+    pub schema: String,
+    pub table_uri: String,
+    #[serde(default = "default_batch_size")]
+    pub batch_size: usize,
+    #[serde(default = "default_batch_timeout")]
+    pub batch_timeout_ms: u64,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_batch_size() -> usize {
+    1000
+}
+
+fn default_batch_timeout() -> u64 {
+    1000
+}
+
+/// Root connector configuration file (`delta_sink.toml`)
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
+pub struct DeltaSinkConfig {
+    pub connector: ConnectorHeader,
+    pub iggy: IggyConnectionConfig,
+    #[serde(default)]
+    pub sinks: Vec<DeltaSinkDefinition>,
+}
+
+/// Parses and validates an Apache Iggy `delta_sink` TOML configuration string.
+/// Strictly enforces `schema = "json"` on all stream sinks and validates that target tables exist
+/// when `delta_base_dir` is provided.
+pub fn parse_and_validate_connector_config(
+    toml_content: &str,
+    delta_base_dir: Option<&Path>,
+) -> Result<DeltaSinkConfig, Box<dyn std::error::Error + Send + Sync>> {
+    let config: DeltaSinkConfig = toml::from_str(toml_content)?;
+
+    if config.connector.plugin != "delta_sink" {
+        return Err(format!(
+            "Invalid connector plugin: '{}', expected 'delta_sink'",
+            config.connector.plugin
+        )
+        .into());
+    }
+
+    if config.connector.connector_type != "sink" {
+        return Err(format!(
+            "Invalid connector type: '{}', expected 'sink'",
+            config.connector.connector_type
+        )
+        .into());
+    }
+
+    if config.sinks.is_empty() {
+        return Err("delta_sink configuration must contain at least one sink definition".into());
+    }
+
+    for sink in &config.sinks {
+        if sink.name.trim().is_empty() {
+            return Err("Sink definition cannot have an empty name".into());
+        }
+        if sink.stream.trim().is_empty() {
+            return Err(format!("Sink '{}' cannot have an empty stream", sink.name).into());
+        }
+        if sink.topic.trim().is_empty() {
+            return Err(format!("Sink '{}' cannot have an empty topic", sink.name).into());
+        }
+        if sink.batch_size == 0 {
+            return Err(format!("Sink '{}' batch_size must be greater than zero", sink.name).into());
+        }
+        if sink.batch_timeout_ms == 0 {
+            return Err(format!("Sink '{}' batch_timeout_ms must be greater than zero", sink.name).into());
+        }
+
+        // Enforce strict JSON schema invariant (AD-28b)
+        if sink.schema != "json" {
+            return Err(format!(
+                "Sink '{}' violates contract: stream schema must be 'json', got '{}'. Non-JSON formats are rejected.",
+                sink.name, sink.schema
+            )
+            .into());
+        }
+
+        // Validate table_uri format
+        let normalized_uri = sink.table_uri.replace('\\', "/");
+        let trimmed_uri = normalized_uri.trim_end_matches('/');
+
+        if trimmed_uri == "/data/delta" || trimmed_uri == "data/delta" {
+            return Err(format!(
+                "Sink '{}' table_uri '{}' must target a specific table directory under '/data/delta/', not the base directory itself",
+                sink.name, sink.table_uri
+            )
+            .into());
+        }
+
+        if !trimmed_uri.starts_with("/data/delta/") && !trimmed_uri.starts_with("data/delta/") {
+            return Err(format!(
+                "Sink '{}' table_uri '{}' must target '/data/delta/' storage path",
+                sink.name, sink.table_uri
+            )
+            .into());
+        }
+
+        let table_name = trimmed_uri.rsplit('/').next().unwrap_or("");
+        if table_name.is_empty() {
+            return Err(format!(
+                "Sink '{}' table_uri '{}' cannot resolve to an empty table name",
+                sink.name, sink.table_uri
+            )
+            .into());
+        }
+
+        // Check target table pre-existence if base delta directory is provided
+        if let Some(base_dir) = delta_base_dir {
+            let table_dir = base_dir.join(table_name);
+            let log_zero = table_dir.join("_delta_log").join("00000000000000000000.json");
+            if !log_zero.exists() {
+                return Err(format!(
+                    "Target Delta table for sink '{}' missing at '{}'. Tables must be pre-created via 'streaming-admin init-delta-storage' before connector launch.",
+                    sink.name, table_dir.display()
+                )
+                .into());
+            }
+
+            let metadata = std::fs::metadata(&log_zero)?;
+            if metadata.len() == 0 {
+                return Err(format!(
+                    "Target Delta table for sink '{}' at '{}' has corrupt/empty commit log (0 bytes). Re-run 'streaming-admin init-delta-storage'.",
+                    sink.name, log_zero.display()
+                )
+                .into());
+            }
+
+            // Verify log content integrity
+            let content = std::fs::read_to_string(&log_zero)?;
+            let mut has_protocol = false;
+            let mut has_metadata = false;
+            let mut has_commit_info = false;
+            for line in content.lines() {
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(line) {
+                    if val.get("protocol").is_some() {
+                        has_protocol = true;
+                    }
+                    if let Some(meta) = val.get("metaData") {
+                        if meta.get("name").and_then(|n| n.as_str()) == Some(table_name) {
+                            has_metadata = true;
+                        }
+                    }
+                    if val.get("commitInfo").is_some() {
+                        has_commit_info = true;
+                    }
+                }
+            }
+
+            if !has_protocol || !has_metadata || !has_commit_info {
+                return Err(format!(
+                    "Target Delta table for sink '{}' at '{}' is missing valid Delta protocol, metadata for '{}', or commitInfo actions.",
+                    sink.name, log_zero.display(), table_name
+                )
+                .into());
+            }
+        }
+    }
+
+    Ok(config)
+}
+
+/// Step 6: Validates an on-disk `delta_sink.toml` connector configuration file
+pub async fn run_validate_connectors(
+    config_path: &Path,
+    delta_dir: Option<&Path>,
+    dry_run: bool,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    println!("==================================================================");
+    println!("  [Step 6] Validate Apache Iggy Delta Lake Sink Connector Config  ");
+    println!("==================================================================");
+    let resolved_cfg = resolve_connector_config_path(config_path);
+    let resolved_delta = delta_dir.map(resolve_delta_dir);
+
+    println!(" Config Path: {:?}", resolved_cfg);
+    if let Some(ref dir) = resolved_delta {
+        println!(" Delta Dir:   {:?}", dir);
+    }
+
+    let toml_str = std::fs::read_to_string(&resolved_cfg)
+        .map_err(|e| format!("Failed to read connector config at {:?}: {}", resolved_cfg, e))?;
+
+    let parsed = parse_and_validate_connector_config(
+        &toml_str,
+        if dry_run { None } else { resolved_delta.as_deref() },
+    )?;
+
+    println!(
+        "  [OK] Connector header valid: {} ({})",
+        parsed.connector.name, parsed.connector.plugin
+    );
+    for sink in &parsed.sinks {
+        println!(
+            "  [OK] Sink '{}': stream='{}', topic='{}', schema='{}', uri='{}'",
+            sink.name, sink.stream, sink.topic, sink.schema, sink.table_uri
+        );
+    }
+    if dry_run {
+        println!("\n  [SUCCESS] All connector sinks validated with schema = 'json' (dry-run mode, table disk checks bypassed)!");
+    } else {
+        println!("\n  [SUCCESS] All connector sinks validated with schema = 'json' and pre-created tables!");
+    }
     Ok(())
 }
 
@@ -714,9 +1044,10 @@ mod tests {
 
     #[test]
     fn test_table_spec_invariants() {
-        assert_eq!(TABLES.len(), 3);
+        assert_eq!(TABLES.len(), 4);
         assert_eq!(STREAMING_TOPICS.len(), 2);
         assert_eq!(BENCHMARK_TOPICS.len(), 1);
-        assert_eq!(CONSUMER_GROUPS.len(), 4);
+        assert_eq!(OLIST_TOPICS.len(), 1);
+        assert_eq!(CONSUMER_GROUPS.len(), 5);
     }
 }

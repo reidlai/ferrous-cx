@@ -21,6 +21,7 @@ services:
       - "${PORT_IGGY_HTTP:-3000}:3000"
     volumes:
       - ./config/streaming/iggy.toml:/etc/iggy/iggy.toml:ro
+      - ./config/streaming/connectors:/etc/iggy/connectors:ro
       - iggy_data:/data/iggy
       - delta_data:/data/delta
     environment:
