@@ -22,7 +22,6 @@ fi
 
 REQUIRED_SUBMODULES=(
     "ferrous-iam"
-    "ferrous-streaming"
     "stream-replay-rs"
     "ferrous-vectordb"
     "ferrous-cqrses"
@@ -30,7 +29,6 @@ REQUIRED_SUBMODULES=(
     "ferrous-agent"
     "ferrous-frontend"
     "ferrous-reverseproxy"
-    "iggy-kafka-bridge"
 )
 
 for sub in "${REQUIRED_SUBMODULES[@]}"; do

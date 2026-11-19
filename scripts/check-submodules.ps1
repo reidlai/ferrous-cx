@@ -27,15 +27,13 @@ $gitmodulesContent = Get-Content $GitmodulesPath -Raw
 
 $requiredSubmodules = @(
     "ferrous-iam",
-    "ferrous-streaming",
     "stream-replay-rs",
     "ferrous-vectordb",
     "ferrous-cqrses",
     "ferrous-api",
     "ferrous-agent",
     "ferrous-frontend",
-    "ferrous-reverseproxy",
-    "iggy-kafka-bridge"
+    "ferrous-reverseproxy"
 )
 
 foreach ($sub in $requiredSubmodules) {

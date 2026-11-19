@@ -1,9 +1,6 @@
 [submodule "ferrous-iam"]
 	path = ferrous-iam
 	url = https://github.com/reidlai/ferrous-iam.git
-[submodule "ferrous-streaming"]
-	path = ferrous-streaming
-	url = https://github.com/reidlai/ferrous-streaming.git
 [submodule "stream-replay-rs"]
 	path = stream-replay-rs
 	url = https://github.com/reidlai/stream-replay-rs.git
@@ -25,6 +22,3 @@
 [submodule "ferrous-reverseproxy"]
 	path = ferrous-reverseproxy
 	url = https://github.com/reidlai/ferrous-reverseproxy.git
-[submodule "iggy-kafka-bridge"]
-	path = iggy-kafka-bridge
-	url = https://github.com/reidlai/iggy-kafka-bridge.git
