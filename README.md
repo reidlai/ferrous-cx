@@ -115,7 +115,7 @@ flowchart TD
 | **Domain Events** | `CourtesyCreditIssued`<br/>`CourtesyCreditSettled` | **Facts:** Immutable historical records published to Apache Iggy (`orders/events`) once durably committed to SierraDB. |
 | **Read Projection** | `order-projection`<br/>(`ferrous-cqrses/src/bin/order_projection.rs`) | **Read Model Materializer:** Consumes `orders/events` under consumer group `cg-order-projection`, purely folds events into state snapshots, and persists `orders_current_state` directly to **Delta Lake via `delta-rs`**. |
 | **Domain Projection** | `order-saga`<br/>(`ferrous-cqrses/src/bin/order_saga.rs`) | **Process Manager (Saga):** Listens to `orders/events`, coordinates long-running side-effects with private internal enterprise backends (ERP, SAP), and deposits completed responses onto `orders/callbacks`. |
-| **Callback Loop** | `Callback Command Worker`<br/>(`ferrous-api`) | **Closing the Loop:** Consumes enterprise responses from `orders/callbacks`, transforms them into a **`SettleCourtesyCreditCommand`**, and routes them back through the **Command Handler** to validate against the **Aggregate** and atomically commit terminal events to **SierraDB**. |
+| **Callback Loop** | `Callback Command Worker`<br/>(`ferrous-cqrses/src/callback.rs`) | **Closing the Loop:** Consumes enterprise responses from `orders/callbacks`, transforms them into a **`SettleCourtesyCreditCommand`**, and routes them back through the **Command Handler** to validate against the **Aggregate** and atomically commit terminal events to **SierraDB**. |
 
 ---
 
@@ -224,7 +224,7 @@ $$\text{Axum SSE Stream} \xrightarrow{\text{EventSource / Fetch}} \textbf{RxJS O
 * **Transactional Event Store:** **SierraDB** (`sierradb`), pure-Rust RESP3 distributed event store providing sub-millisecond atomic append operations (`EAPPEND`), event stream scanning (`ESCAN`), and version checks (`ESVER`) with optimistic concurrency control for `ferrous-cqrses` aggregates.
 * **Message Broker & Lakehouse Sinks:** **Apache Iggy** for ultra-high throughput event and conversation telemetry streaming with built-in native **`delta_sink`** connector streaming directly to Delta Lake Parquet tables in `/data/delta/` (`orders_raw_events`, `orders_current_state`, `olist_orders`, `hpc_benchmarks`) with strict `schema = "json"` invariants.
 * **CQRS-ES Engine (`ferrous-cqrses`):** Pure-Rust Domain-Driven CQRS/ES engine built on the `cqrs-es` crate. Under Topology A, `ferrous-api` hosts the synchronous `CommandHandler` backed by SierraDB (`EventStore`) enforcing invariants ($20 courtesy credit cap, lifecycle states) before committing atomic event streams (`EAPPEND`), and dispatches committed domain events to Apache Iggy (`orders/events`). The dedicated `order-projection` daemon consumes `orders/events` via consumer group `cg-order-projection`, constructs `ConsolidatedOrderProjection` snapshots, and emits them to `orders/consolidated` for Apache Iggy `delta_sink` Delta Lake table materialization.
-* **Domain Projection (`order-saga`):** Dedicated standalone daemon in `ferrous-cqrses` (`order-saga`) consuming domain events from Apache Iggy via consumer group `cg-order-saga`. Residing inside the private enterprise network, it orchestrates directly with internal enterprise workflows (SAP, ERP, mainframes) and relays responses to Apache Iggy (`orders/callbacks`) for asynchronous command processing in `ferrous-api`.
+* **Domain Projection (`order-saga`):** Dedicated standalone daemon in `ferrous-cqrses` (`order-saga`) consuming domain events from Apache Iggy via consumer group `cg-order-saga`. Residing inside the private enterprise network, it orchestrates directly with internal enterprise workflows (SAP, ERP, mainframes) and relays responses to Apache Iggy (`orders/callbacks`) for asynchronous command processing in `ferrous-cqrses`.
 
 ### Enterprise Workflow & Domain Projection Orchestration (Epic 18)
 
@@ -236,13 +236,13 @@ $$\begin{aligned}
 \text{Domain Event } (\texttt{CreditIssuedEvent}) &\xrightarrow{\text{Apache Iggy } (\texttt{orders/events})} \textbf{Domain Projection } (\texttt{cg-order-saga}) \\
 &\xleftrightarrow{\text{Internal Enterprise Network}} \textbf{Enterprise Workflow / Backend System} \\
 &\xrightarrow{\text{Publish Response Message}} \textbf{Apache Iggy Callback Queue } (\texttt{orders/callbacks}) \\
-&\xrightarrow{\text{cg-order-callback}} \textbf{Callback Command Worker } (\texttt{ferrous-api}) \\
+&\xrightarrow{\text{cg-order-callback}} \textbf{Callback Command Worker } (\texttt{ferrous-cqrses}) \\
 &\xrightarrow{\text{Command Dispatch}} \textbf{SierraDB Event Store } (\texttt{EAPPEND } \rightarrow \texttt{CourtesyCreditSettled})
 \end{aligned}$$
 
 1. **Decoupled Consumer Groups:** `order-projection` operates under consumer group `cg-order-projection`, while `Domain Projection` (`order-saga`) operates under `cg-order-saga`. Projection lag or replays never disrupt or duplicate outbound saga dispatches.
 2. **Internal Network Security:** Core enterprise backends remain shielded behind corporate firewalls with zero public API exposure. The internal `Domain Projection` worker manages enterprise integration and dispatches outbound calls with exponential backoff and retry limits.
-3. **Iggy Callback Queue Ingress:** Enterprise workflow responses are queued into Apache Iggy under topic `orders/callbacks`. The `Callback Command Worker` in `ferrous-api` consumes payloads under consumer group `cg-order-callback`, validates aggregate invariants against SierraDB, and executes `SettleCourtesyCreditCommand` or `FailCourtesyCreditSettlementCommand` to atomically commit the terminal settlement event to SierraDB via `EAPPEND`.
+3. **Iggy Callback Queue Ingress:** Enterprise workflow responses are queued into Apache Iggy under topic `orders/callbacks`. The `Callback Command Worker` in `ferrous-cqrses` consumes payloads under consumer group `cg-order-callback`, validates aggregate invariants against SierraDB, and executes `SettleCourtesyCreditCommand` or `FailCourtesyCreditSettlementCommand` to atomically commit the terminal settlement event to SierraDB via `EAPPEND`.
 
 ### Direct `rig` + `DataFusion` Integration
 Tools implement `rig::tool::Tool` and directly hold an `Arc<SessionContext>`:
