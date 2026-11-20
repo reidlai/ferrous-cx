@@ -57,20 +57,18 @@ flowchart TD
         Aggregate -->|"4 & 8. Rehydrate Aggregate"| CommandHandler
         CommandHandler -->|"6. EAPPEND Save to Stream"| SierraDB
         CommandHandler -->|"9. Publish to Iggy Topic"| IggyEvents
-    end
-
-    subgraph Streaming_Fabric ["Message Broker & Event Bus (Apache Iggy)"]
-        IggyEvents["Topic: orders/events<br/>• Committed Domain Events<br/>(CourtesyCreditIssued, Settled)"]
-        IggyCallbacks["Topic: orders/callbacks<br/>• Internal Enterprise Responses<br/>(CreditSettlementResponse)"]
+        CallbackWorker -->|"15. Construct Settle Command"| CommandHandler        
     end
 
     subgraph Projection_Tier ["Projections & Saga Daemon (ferrous-cqrses)"]
         OrderProjection["Order Projection (order-projection)<br/>• Consumer Group: cg-order-projection<br/>• Pure Event Folding"]
-        DomainProjection["Domain Projection (order-saga)<br/>• Consumer Group: cg-order-saga<br/>• Private Network Orchestrator"]
-    end
+        DeltaLake[("Delta Lake Storage (/data/delta)<br/>• orders_current_state (Snapshots)<br/>• orders_raw_events (Audit Log)")]        
+        IggyEvents["Topic: orders/events<br/>• Committed Domain Events<br/>(CourtesyCreditIssued, Settled)"]        
+        IggyCallbacks["Topic: orders/callbacks<br/>• Internal Enterprise Responses<br/>(CreditSettlementResponse)"]        
 
-    subgraph Lakehouse_Tier ["Analytical Lakehouse Storage"]
-        DeltaLake[("Delta Lake Storage (/data/delta)<br/>• orders_current_state (Snapshots)<br/>• orders_raw_events (Audit Log)")]
+        IggyEvents -->|"10. Consume orders/events"| OrderProjection
+        OrderProjection -->|"12. Commit Snapshots via delta-rs"| DeltaLake
+        OrderProjection -->|"13. Place Response Payload"| IggyCallbacks       
     end
 
     subgraph Enterprise_Tier ["Internal Enterprise Network (Private / Non-Public)"]
@@ -78,29 +76,15 @@ flowchart TD
     end        
 
     Client_Tier ~~~ API_Tier
-    API_Tier ~~~ Streaming_Fabric
-    Streaming_Fabric ~~~ Projection_Tier
-    Projection_Tier ~~~ Lakehouse_Tier
+    API_Tier ~~~ Projection_Tier
     Projection_Tier ~~~ Enterprise_Tier    
 
     %% Step 1: User Command Ingestion
     Client -->|"1. Submit Request"| Command
-    CommandHandler -.->|"Live SSE Update"| Client
+    CommandHandler -.->|"16. Live SSE Update"| Client
+    OrderProjection -->|"11. Call Enterprise Workflow"| EnterpriseWorkflow
+    IggyCallbacks -->|"14. Consume Callback Message"| CallbackWorker
 
-    %% Step 2: Projections & Delta Lake Write
-    IggyEvents -->|"10a. Consume orders/events"| OrderProjection
-    OrderProjection -->|"11a. Commit Snapshots via delta-rs"| DeltaLake
-
-    %% Step 3: Domain Projection Consumption
-    IggyEvents -->|"10b. Consume CreditIssuedEvent"| DomainProjection
-    DomainProjection -->|"11b. Private Network Execution"| EnterpriseWorkflow
-
-    %% Step 4: Callback Queue Placement
-    DomainProjection -->|"12. Place Response Payload"| IggyCallbacks
-
-    %% Step 5: Callback to Command Loop
-    IggyCallbacks -->|"13. Consume Callback Message"| CallbackWorker
-    CallbackWorker -->|"14. Construct Settle Command"| Command
 ```
 
 #### How Command, Command Handler, Aggregate, and Projection Work Together:
