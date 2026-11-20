@@ -348,7 +348,7 @@ ferrous-cx/ (This Repository - Core Public Repository: demo config, runtime stac
 | **2** | **`ferrous-iam`** | [`reidlai/ferrous-iam`](https://github.com/reidlai/ferrous-iam) | Identity & Access Management container engine (Kanidm pure-Rust IdP, OIDC/OAuth2). Platform personas (`seed-rbac.json`, `seed-m2m.json`) and TLS certificates are decoupled into and managed by `ferrous-cx`. | Pure-Rust Kanidm / Docker |
 | **3** | **`ferrous-vectordb`** | [`reidlai/ferrous-vectordb`](https://github.com/reidlai/ferrous-vectordb) | Qdrant vector database indexing enterprise SOPs & support transcripts | Qdrant Vector DB / FastEmbed |
 | **4** | **`ferrous-cqrses`** | [`reidlai/ferrous-cqrses`](https://github.com/reidlai/ferrous-cqrses) | Domain-Driven CQRS/ES Library (`cqrs-es`), Order Projection Daemon (`order-projection`), and Asynchronous Saga Process Manager Daemon (`order-saga`) with SierraDB EventStore | Pure-Rust Library Crate & Daemons |
-| **5** | **`ferrous-api`** | [`reidlai/ferrous-api`](https://github.com/reidlai/ferrous-api) | Contract-First Axum API Service (Goa DSL, rust-axum, in-process DataFusion <3ms SQL, Axum SSE, M2M Settlement Webhook Gateway) | Goa v3 / Axum / DataFusion |
+| **5** | **`ferrous-api`** | [`reidlai/ferrous-api`](https://github.com/reidlai/ferrous-api) | Contract-First Axum API Service (Goa DSL, rust-axum, in-process DataFusion <3ms SQL, Axum SSE, Asynchronous Settlement Callback Service) | Goa v3 / Axum / DataFusion |
 | **6** | **`ferrous-agent`** | [`reidlai/ferrous-agent`](https://github.com/reidlai/ferrous-agent) | Pure-Rust Multi-Provider AI Engine (`rig-core`), Context Sanitizer & In-Process Benchmarks | `rig-core` / Context Sanitizer |
 | **7** | **`ferrous-frontend`** | [`reidlai/ferrous-frontend`](https://github.com/reidlai/ferrous-frontend) | Svelte 5 + shadcn-svelte 3-column UI workbench, including the read-only Replay Monitor | Svelte 5 / shadcn-svelte / RxJS / Tailwind |
 | **8** | **`ferrous-reverseproxy`** | [`reidlai/ferrous-reverseproxy`](https://github.com/reidlai/ferrous-reverseproxy) | Zentinel (Cloudflare Pingora) Edge Reverse Proxy, TLS 1.3 Termination & OWASP WAF | Pure-Rust Zentinel / Pingora / CRS |
@@ -548,7 +548,7 @@ docker compose ps        # wait until ferrous-iam, iggy-broker, sierradb, and ve
 | SierraDB Event Store | `localhost:9090` | Pure-Rust RESP3 Event Store (`EAPPEND`, `ESCAN`, `ESVER`) |
 | Qdrant Vector DB | `http://localhost:6333/readyz` | Vector DB for SOPs & Transcripts |
 | Ferrous API Gateway | `http://localhost:8080/health` | Axum API + SSE + In-Process DataFusion |
-| Settlement Webhook Gateway | `http://localhost:8080/api/v1/webhooks/orders/settlement-callback` | M2M Async Settlement Ingress (Kanidm JWT) |
+| Settlement Callback Service | `orders/callbacks` (`cg-order-callback`) | Asynchronous Settlement Callback Ingress (SierraDB Commit) |
 | Order Saga Daemon | Internal (`cg-order-saga`) | Outbound Enterprise Saga Process Manager |
 | Frontend UI | `http://localhost:5173/` | Svelte 5 Operator Studio (read-only) |
 
