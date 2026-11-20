@@ -33,17 +33,26 @@ The end-to-end dataflow across FerrousCX unites historical lakehouse analytics, 
 
 ```mermaid
 flowchart TD
-    Client["Frontend Client<br/>(Svelte 5 + shadcn-svelte)"] -->|"POST /v1/chat/completions"| ApiService["FerrousCX API Service<br/>(Rust / Axum + Axum SSE)"]
+    Client["Frontend Client<br/>(Svelte 5 + shadcn-svelte)"] -->|"POST /v1/commands/... (Command)"| ApiService["FerrousCX API Service<br/>(Rust / Axum + CqrsFramework)"]
     ApiService -->|"SSE Event Stream"| Client
 
     subgraph Ingestion_Source ["External Traffic Replayer"]
         Replayer["Traffic Replayer<br/>(stream-replay-rs)"]
     end
 
+    subgraph CQRS_Write_Path ["Transactional CQRS-ES Write Tier (Order Domain)"]
+        SierraDB[("SierraDB Pure-Rust Event Store<br/>• Port 9090 (RESP3 Protocol)<br/>• EAPPEND / ESCAN / ESVER")]
+        ApiService <-->|"1. ESCAN & EAPPEND (Atomic Event Commit)"| SierraDB
+        OrderHandler["Order Handler Daemon<br/>(ferrous-cqrses / Background Stream)"]
+        OrderHandler <-->|"RESP3 WAL"| SierraDB
+    end
+
     subgraph Streaming_Tier ["Consolidated Streaming & Lakehouse Tier (ferrous-cx)"]
-        Iggy["Apache Iggy Broker<br/>• Port 8090 (Native TCP)<br/>• Port 3000 (HTTP)"]
+        Iggy["Apache Iggy Event Bus<br/>• Port 8090 (Native TCP)<br/>• Port 3000 (HTTP)"]
         DeltaSink["Apache Iggy delta_sink Connector<br/>• config/streaming/connectors/delta_sink.toml<br/>• Strict schema = 'json' Invariants"]
 
+        ApiService -->|"2. Publish Committed Events to Event Bus"| Iggy
+        OrderHandler -->|"Publish Events"| Iggy
         Iggy -->|"Stream Records (orders/*, olist/*)"| DeltaSink
 
         DeltaLake[("Delta Lake (Parquet Tables)<br/>• orders_raw_events (Audit Log)<br/>• orders_current_state (State Projection)<br/>• olist_orders (Historical Replay)<br/>• hpc_benchmarks (Benchmarks)")]
@@ -53,23 +62,13 @@ flowchart TD
         DeltaLake -->|"Vectorized SQL Scan (<3ms)"| DataFusion
     end
 
-    subgraph CQRS_Path ["Transactional CQRS-ES Pipeline (Live Orders)"]
-        CQRS["Command Handler & Aggregate<br/>(ferrous-cqrses)"]
-        SierraDB[("SierraDB Pure-Rust Event Store<br/>• Port 9090 (RESP3 Protocol)<br/>• EAPPEND / ESCAN / ESVER")]
-        CQRS <-->|"2. RESP3 Event Sourcing WAL<br/>(Optimistic Concurrency Control)"| SierraDB
-        CQRS -->|"3. Publish Domain Events (Native TCP)"| Iggy
-        Iggy -->|"Event Stream Consumer"| Projector["State Projector / Read Model<br/>(Live Read Projections)"]
-    end
-
     subgraph IAM_Layer ["Authentication & Access Control (Pure Rust)"]
         IAM[("Kanidm IdP Engine<br/>(ferrous-iam:8443)")]
     end
 
     %% Cross-tier communication edges
-    Replayer -->|"1. Replay Ingestion (Native TCP: Port 8090)"| Iggy
+    Replayer -->|"Replay Ingestion (Native TCP: Port 8090)"| Iggy
     ApiService -.->|"Historical Analytical Queries"| DataFusion
-    ApiService -->|"Command Mutation"| CQRS
-    Projector -.->|"Read Active Aggregate State"| ApiService
     Client -.->|"OIDC PKCE Login / Bearer JWT"| IAM
     ApiService -.->|"Cached JWKS Signature Check"| IAM
 ```
@@ -129,7 +128,7 @@ $$\text{Axum SSE Stream} \xrightarrow{\text{EventSource / Fetch}} \textbf{RxJS O
 * **Analytical Query Engine:** **Apache DataFusion** executing vectorized SQL scans in <3ms directly against Delta Lake Parquet tables, embedded in-process in `ferrous-api` and `ferrous-cqrses` for sub-millisecond historical analytics.
 * **Transactional Event Store:** **SierraDB** (`sierradb`), pure-Rust RESP3 distributed event store providing sub-millisecond atomic append operations (`EAPPEND`), event stream scanning (`ESCAN`), and version checks (`ESVER`) with optimistic concurrency control for `ferrous-cqrses` aggregates.
 * **Message Broker & Lakehouse Sinks:** **Apache Iggy** for ultra-high throughput event and conversation telemetry streaming with built-in native **`delta_sink`** connector streaming directly to Delta Lake Parquet tables in `/data/delta/` (`orders_raw_events`, `orders_current_state`, `olist_orders`, `hpc_benchmarks`) with strict `schema = "json"` invariants.
-* **CQRS-ES Engine (`ferrous-cqrses`):** Pure-Rust domain command handlers enforcing business invariants ($20 credit cap), managing aggregate rehydration against SierraDB, and publishing validated domain events to Apache Iggy for event bus consumers and live state projections.
+* **CQRS-ES Engine (`ferrous-cqrses`):** Pure-Rust Domain-Driven CQRS/ES engine built on the `cqrs-es` crate. The `order-handler` microservice enforces business invariants ($20 credit cap), manages aggregate rehydration and optimistic concurrency against SierraDB (`EventStore`), and dispatches committed domain events to Apache Iggy (`Query` event bus) for downstream consumers and live state projections.
 
 ### Direct `rig` + `DataFusion` Integration
 Tools implement `rig::tool::Tool` and directly hold an `Arc<SessionContext>`:
@@ -234,7 +233,7 @@ ferrous-cx/ (This Repository - Core Public Repository: demo config, runtime stac
 | **1** | **`stream-replay-rs`** | [`reidlai/stream-replay-rs`](https://github.com/reidlai/stream-replay-rs) | Independent, dataset-agnostic multi-sink traffic replayer with timestamp rebasing and speed control | Pure-Rust CLI & Library Crate |
 | **2** | **`ferrous-iam`** | [`reidlai/ferrous-iam`](https://github.com/reidlai/ferrous-iam) | Identity & Access Management container engine (Kanidm pure-Rust IdP, OIDC/OAuth2). Platform personas (`seed-rbac.json`, `seed-m2m.json`) and TLS certificates are decoupled into and managed by `ferrous-cx`. | Pure-Rust Kanidm / Docker |
 | **3** | **`ferrous-vectordb`** | [`reidlai/ferrous-vectordb`](https://github.com/reidlai/ferrous-vectordb) | Qdrant vector database indexing enterprise SOPs & support transcripts | Qdrant Vector DB / FastEmbed |
-| **4** | **`ferrous-cqrses`** | [`reidlai/ferrous-cqrses`](https://github.com/reidlai/ferrous-cqrses) | Dual-Role CQRS Library (`lib.rs`) & Command Handler Service ($20 Credit Cap) with SierraDB event sourcing | Pure-Rust Library Crate & Service |
+| **4** | **`ferrous-cqrses`** | [`reidlai/ferrous-cqrses`](https://github.com/reidlai/ferrous-cqrses) | Domain-Driven CQRS/ES Library (`cqrs-es`) & Order Handler Service ($20 Credit Cap) with SierraDB EventStore | Pure-Rust Library Crate & Service |
 | **5** | **`ferrous-api`** | [`reidlai/ferrous-api`](https://github.com/reidlai/ferrous-api) | Contract-First Axum API Service (Goa DSL, rust-axum, in-process DataFusion <3ms SQL, Axum SSE) | Goa v3 / Axum / DataFusion |
 | **6** | **`ferrous-agent`** | [`reidlai/ferrous-agent`](https://github.com/reidlai/ferrous-agent) | Pure-Rust Multi-Provider AI Engine (`rig-core`), Context Sanitizer & In-Process Benchmarks | `rig-core` / Context Sanitizer |
 | **7** | **`ferrous-frontend`** | [`reidlai/ferrous-frontend`](https://github.com/reidlai/ferrous-frontend) | Svelte 5 + shadcn-svelte 3-column UI workbench, including the read-only Replay Monitor | Svelte 5 / shadcn-svelte / RxJS / Tailwind |
@@ -250,7 +249,7 @@ ferrous-cx/ (This Repository - Core Public Repository: demo config, runtime stac
 `ferrous-cx` provides the unified integration, Day-0 security hardening, and developer runtime harness for the platform:
 
 1. **Zero-Daemon Local Development:** Launch the platform with a single `docker compose up -d`, requiring zero external host dependencies.
-2. **Explicit Healthcheck Dependency Graph:** Startup is gated with `condition: service_healthy`. `iggy-broker`, `sierradb`, and `ferrous-vectordb` boot first, then storage consumers, `command-handler` (`ferrous-cqrses`), the API gateway, reverse proxy and frontend. `ferrous-iam` gates only `ferrous-api`, `ferrous-agent` and `ferrous-frontend`; the data platform does not depend on it.
+2. **Explicit Healthcheck Dependency Graph:** Startup is gated with `condition: service_healthy`. `iggy-broker`, `sierradb`, and `ferrous-vectordb` boot first, then storage consumers, `order-handler` (`ferrous-cqrses`), the API gateway (`ferrous-api`, gated by `sierradb` and `iggy-broker`), reverse proxy and frontend. `ferrous-iam` gates only `ferrous-api`, `ferrous-agent` and `ferrous-frontend`; the data platform does not depend on it.
 3. **Day-0 Kernel Hardening:** All application containers enforce:
    - `read_only: true` (immutable root filesystem).
    - `cap_drop: ALL` (zero elevated Linux capabilities).
@@ -271,7 +270,7 @@ ferrous-cx/ (This Repository - Core Public Repository: demo config, runtime stac
 | `ferrous-cx` | `ferrous-iggy-broker` | `3000` (HTTP), `8090` (TCP) | Iggy ping HTTP 200 | Yes |
 | `ferrous-cx` | `ferrous-sierradb` | `9090` (RESP3) | TCP port 9090 probe | Yes |
 | `ferrous-vectordb` | `ferrous-vectordb` | `6333` (HTTP), `6334` (gRPC) | `GET /readyz` HTTP 200 | Yes |
-| `ferrous-cqrses` | `command-handler` | Internal | Command handler startup | Yes |
+| `ferrous-cqrses` | `order-handler` | Internal | Order handler startup | Yes |
 | `ferrous-api` | `ferrous-api` | `8080` (HTTP) | `GET /health` HTTP 200 | Yes |
 | `ferrous-agent` | `ferrous-agent` | `8081` (HTTP) | `GET /health` HTTP 200 | Yes |
 | `ferrous-frontend` | `ferrous-frontend` | `5173` (HTTP) | `GET /health` HTTP 200 | Yes |

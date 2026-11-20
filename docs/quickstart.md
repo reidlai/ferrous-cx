@@ -8,8 +8,8 @@ Welcome to the **FerrousCX High-Performance Customer Experience Platform**. This
 
 FerrousCX unites ten decoupled services into a deterministic, Day-0 hardened container topology:
 - **Perimeter & Security:** `ferrous-reverseproxy` (Zentinel / Hyper TLS termination on ports 80/443 with Day-0 OWASP WAF), `ferrous-iam` (Kanidm pure-Rust IdP on port 8443).
-- **Event Streaming & WAL:** `iggy-broker` (Apache Iggy memory/disk WAL on port 3000/8090), `bridge` / `bridge-host` (Iggy-Kafka bridge on 9092), `arroyo` (distributed streaming engine on 5115), and `delta-store` (Delta Lake 2PC ACID engine).
-- **Core Domain & CQRS:** `command-handler` (CQRS-ES aggregate root), `ferrous-api` (Axum REST & SSE API gateway on 8080), `vectordb` (Qdrant vector engine on 6333), and `ferrous-agent` (Rig-core AI engine on 8081).
+- **Event Streaming & Lakehouse Sinks:** `iggy-broker` (Apache Iggy streaming message broker on ports 3000/8090 with built-in native `delta_sink` connector maintaining Delta Lake Parquet tables in `/data/delta/`).
+- **Transactional Event Store & Domain CQRS:** `sierradb` (pure-Rust RESP3 distributed event store on port 9090), `order-handler` (Order domain CQRS-ES aggregate root using `cqrs-es`), `ferrous-api` (Axum REST & SSE API gateway on 8080 with embedded in-process DataFusion), `vectordb` (Qdrant vector engine on 6333), and `ferrous-agent` (Rig-core AI engine on 8081).
 - **Observability & Studio:** `jaeger` (Ephemeral in-memory Jaeger v2 on 4317/4318/16686) and `ferrous-frontend` (Svelte 5 Operator Studio on 5173).
 
 ---

@@ -134,13 +134,13 @@ services:
         limits:
           memory: 512M
 
-  # 3. CQRS-ES Command Handler & Aggregate Root (Day-0 Defense)
-  command-handler:
+  # 3. CQRS-ES Order Handler & Aggregate Root - Order Bounded Context (Day-0 Defense)
+  order-handler:
     build:
       context: ../ferrous-cqrses
-      dockerfile: Dockerfile.command_handler
-    image: ferrous-cqrses-command-handler:latest
-    container_name: ferrous-cqrses-command-handler
+      dockerfile: Dockerfile.order_handler
+    image: ferrous-cqrses-order-handler:latest
+    container_name: ferrous-cqrses-order-handler
     user: "10001:10001"
     restart: unless-stopped
     # Day-0 Hardened Runtime Defense Constraints (AD-24)
@@ -158,7 +158,7 @@ services:
       - STREAM_NAME=orders
       - TOPIC_ORDERS_INTAKE=intake
       - TOPIC_ORDERS_CONSOLIDATED=consolidated
-      - CONSUMER_GROUP=cg-cmd-handler
+      - CONSUMER_GROUP=cg-order-handler
       - SIERRADB_URL=${SIERRADB_URL:-redis://sierradb:9090}
     depends_on:
       iggy-broker:
@@ -166,7 +166,7 @@ services:
       sierradb:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "/command_handler", "--healthcheck"]
+      test: ["CMD", "/order_handler", "--healthcheck"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -196,6 +196,7 @@ services:
     environment:
       - PORT=8080
       - IGGY_SERVER_ADDRESS=${IGGY_SERVER_ADDRESS:-iggy-broker:8090}
+      - SIERRADB_URL=${SIERRADB_URL:-redis://sierradb:9090}
       - KANIDM_JWT_SECRET=${KANIDM_JWT_SECRET:-development_kanidm_jwt_secret_32_bytes_minimum!}
       - KANIDM_ISSUER=${KANIDM_ISSUER:-https://iam.ferrouscx.local/oauth2/openid/svc_ferrous_api}
       - DELTA_DATA_DIR=/data/delta
@@ -206,6 +207,8 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4317}
     depends_on:
       iggy-broker:
+        condition: service_healthy
+      sierradb:
         condition: service_healthy
       ferrous-iam:
         condition: service_healthy

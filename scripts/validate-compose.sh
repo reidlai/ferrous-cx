@@ -72,7 +72,7 @@ import re, sys
 with open("${PROJECT_ROOT}/docker-compose.yml", "r", encoding="utf-8") as f:
     content = f.read()
 
-required_services = ["command-handler", "ferrous-api", "ferrous-agent", "ferrous-frontend", "ferrous-reverseproxy"]
+required_services = ["order-handler", "ferrous-api", "ferrous-agent", "ferrous-frontend", "ferrous-reverseproxy"]
 for svc in required_services:
     pattern = rf"(?ms)^\s{{2}}{svc}:.*?(?=^\s{{2}}[a-zA-Z]|\Z)"
     match = re.search(pattern, content)
@@ -110,9 +110,10 @@ checks = [
     (r"(?ms)ferrous-frontend:.*?ferrous-iam:\s*condition:\s*service_healthy", "ferrous-frontend depends on ferrous-iam"),
     (r"(?ms)ferrous-frontend:.*?ferrous-api:\s*condition:\s*service_healthy", "ferrous-frontend depends on ferrous-api"),
     (r"(?ms)ferrous-api:.*?iggy-broker:\s*condition:\s*service_healthy", "ferrous-api depends on iggy-broker"),
+    (r"(?ms)ferrous-api:.*?sierradb:\s*condition:\s*service_healthy", "ferrous-api depends on sierradb"),
     (r"(?ms)ferrous-api:.*?ferrous-iam:\s*condition:\s*service_healthy", "ferrous-api depends on ferrous-iam"),
-    (r"(?ms)command-handler:.*?iggy-broker:\s*condition:\s*service_healthy", "command-handler depends on iggy-broker"),
-    (r"(?ms)command-handler:.*?sierradb:\s*condition:\s*service_healthy", "command-handler depends on sierradb"),
+    (r"(?ms)order-handler:.*?iggy-broker:\s*condition:\s*service_healthy", "order-handler depends on iggy-broker"),
+    (r"(?ms)order-handler:.*?sierradb:\s*condition:\s*service_healthy", "order-handler depends on sierradb"),
     (r"(?ms)ferrous-agent:.*?ferrous-api:\s*condition:\s*service_healthy", "ferrous-agent depends on ferrous-api"),
 ]
 
