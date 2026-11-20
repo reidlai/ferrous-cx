@@ -47,28 +47,32 @@ flowchart TD
 
     subgraph API_Tier ["API Service (ferrous-api & ferrous-cqrses)"]
         Command["Domain Command<br/>• IssueCourtesyCreditCommand<br/>• SettleCourtesyCreditCommand"]
-        CommandHandler["OrderCommandHandler<br/>• 3. ESCAN from SierraDB<br/>• 4. Rehydrate Aggregate<br/>• 5. Invariant Evaluation<br/>• 6. EAPPEND to SierraDB<br/>• 7. ESCAN from SierraDB<br/>• 8. Rehydrate Aggregate<br/>• 9. Publish to Iggy Topic"]
+        CommandHandler["OrderCommandHandler<br/>• 3. ESCAN from SierraDB<br/>• 4. Rehydrate Aggregate<br/>• 5. Invariant Evaluation<br/>• 6. EAPPEND to SierraDB<br/>• 7. Publish to Iggy Topic"]
         Aggregate["OrderAggregate (Domain Model)<br/>• State: Status, Cumulative Credit<br/>• Invariant: Max $20 credit ceiling<br/>• Produces: CourtesyCreditIssued / Settled"]
         CallbackWorker["Callback Command Worker<br/>• Consumer Group: cg-order-callback<br/>• Generates SettleCourtesyCreditCommand"]
         SierraDB[("SierraDB Event Store (Port 9090)<br/>• Pure-Rust RESP3 Protocol<br/>• ESCAN (Rehydrate) & EAPPEND (Atomic Append)")]
 
         Command -->|"2. Dispatch to Handler"| CommandHandler
-        SierraDB -->|"3 & 7. ESCAN from SierraDB"| Aggregate
-        Aggregate -->|"4 & 8. Rehydrate Aggregate"| CommandHandler
+        SierraDB -->|"3. ESCAN from SierraDB"| Aggregate
+        Aggregate -->|"4. State to Handler"| CommandHandler
+        CommandHandler -->|"5. Invariant Evaluation"| Aggregate
         CommandHandler -->|"6. EAPPEND Save to Stream"| SierraDB
-        CommandHandler -->|"9. Publish to Iggy Topic"| IggyEvents
-        CallbackWorker -->|"15. Construct Settle Command"| CommandHandler        
+        CommandHandler -->|"7. Publish to Iggy Topic"| IggyEvents
+        CallbackWorker -->|"15. Settle Command"| CommandHandler        
+    end
+
+    subgraph Streaming_Fabric ["Message Broker & Event Bus (Apache Iggy)"]
+        IggyEvents["Topic: orders/events<br/>• Committed Domain Events<br/>(CourtesyCreditIssued, Settled)"]
+        IggyCallbacks["Topic: orders/callbacks<br/>• Internal Enterprise Responses<br/>(CreditSettlementResponse)"]
     end
 
     subgraph Projection_Tier ["Projections & Saga Daemon (ferrous-cqrses)"]
-        OrderProjection["Order Projection (order-projection)<br/>• Consumer Group: cg-order-projection<br/>• Pure Event Folding"]
-        DeltaLake[("Delta Lake Storage (/data/delta)<br/>• orders_current_state (Snapshots)<br/>• orders_raw_events (Audit Log)")]        
-        IggyEvents["Topic: orders/events<br/>• Committed Domain Events<br/>(CourtesyCreditIssued, Settled)"]        
-        IggyCallbacks["Topic: orders/callbacks<br/>• Internal Enterprise Responses<br/>(CreditSettlementResponse)"]        
+        OrderProjection["Read Projection (order-projection)<br/>• Consumer Group: cg-order-projection<br/>• Pure Event Folding (Zero Side-Effects)"]
+        DomainProjection["Domain Projection (order-saga)<br/>• Consumer Group: cg-order-saga<br/>• Private Network Orchestrator"]
+    end
 
-        IggyEvents -->|"10. Consume orders/events"| OrderProjection
-        OrderProjection -->|"12. Commit Snapshots via delta-rs"| DeltaLake
-        OrderProjection -->|"13. Place Response Payload"| IggyCallbacks       
+    subgraph Lakehouse_Tier ["Analytical Lakehouse Storage"]
+        DeltaLake[("Delta Lake Storage (/data/delta)<br/>• orders_current_state (Snapshots)<br/>• orders_raw_events (Audit Log)")]
     end
 
     subgraph Enterprise_Tier ["Internal Enterprise Network (Private / Non-Public)"]
@@ -76,13 +80,26 @@ flowchart TD
     end        
 
     Client_Tier ~~~ API_Tier
-    API_Tier ~~~ Projection_Tier
+    API_Tier ~~~ Streaming_Fabric
+    Streaming_Fabric ~~~ Projection_Tier
+    Projection_Tier ~~~ Lakehouse_Tier
     Projection_Tier ~~~ Enterprise_Tier    
 
     %% Step 1: User Command Ingestion
     Client -->|"1. Submit Request"| Command
     CommandHandler -.->|"16. Live SSE Update"| Client
-    OrderProjection -->|"11. Call Enterprise Workflow"| EnterpriseWorkflow
+
+    %% Step 2: Projections & Delta Lake Write
+    IggyEvents -->|"8. Consume orders/events"| OrderProjection
+    OrderProjection -->|"9. Commit Snapshots via delta-rs"| DeltaLake
+
+    %% Step 3: Domain Projection Consumption & Enterprise Call
+    IggyEvents -->|"10. Consume CreditIssuedEvent"| DomainProjection
+    DomainProjection -->|"11. Outbound Enterprise Dispatch"| EnterpriseWorkflow
+    EnterpriseWorkflow -->|"12. Private Network Response"| DomainProjection
+
+    %% Step 4: Callback Queue Placement & Handling
+    DomainProjection -->|"13. Place Response Payload"| IggyCallbacks
     IggyCallbacks -->|"14. Consume Callback Message"| CallbackWorker
 
 ```
