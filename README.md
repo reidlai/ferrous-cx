@@ -62,13 +62,13 @@ flowchart TD
         DeltaLake -->|"Vectorized SQL Scan (<3ms)"| DataFusion
     end
 
-    subgraph Saga_Tier ["Enterprise Workflow & Saga Orchestration Tier (Epic 18)"]
-        OrderSaga["Order Saga Process Manager<br/>(ferrous-cqrses / order-saga)<br/>• Consumer Group: cg-order-saga<br/>• Heartbeat Healthcheck & Backoff"]
-        EnterpriseERP["Enterprise ERP / Financial Clearing<br/>(Outbound Settlement Gateway)"]
-
+    subgraph Saga_Process_Manager ["Asynchronous Saga Process Manager (ferrous-cqrses)"]
+        OrderSaga["Order Saga Daemon (order-saga)<br/>• Consumer Group: cg-order-saga"]
         Iggy -->|"3. Consume CreditIssuedEvent (orders/events)"| OrderSaga
-        OrderSaga -->|"4. Outbound Dispatch (POST /settlement with retries)"| EnterpriseERP
-        EnterpriseERP -->|"5. Asynchronous Settlement Callback"| ApiService
+    end
+
+    subgraph External_Enterprise ["External Enterprise Systems"]
+        EnterpriseWorkflow["Enterprise Workflow / Backend System"]
     end
 
     subgraph IAM_Layer ["Authentication & Access Control (Pure Rust)"]
@@ -80,7 +80,10 @@ flowchart TD
     ApiService -.->|"Historical Analytical Queries"| DataFusion
     Client -.->|"OIDC PKCE Login / Bearer JWT"| IAM
     ApiService -.->|"Cached JWKS Signature Check"| IAM
-    EnterpriseERP -.->|"M2M Bearer Token (svc_ferrous_api)"| IAM
+
+    OrderSaga -->|"4. Outbound Dispatch (HTTP POST with backoff)"| EnterpriseWorkflow
+    EnterpriseWorkflow -->|"5. Asynchronous Webhook Callback"| ApiService
+    EnterpriseWorkflow -.->|"M2M Bearer Token"| IAM
 ```
 
 ---
@@ -139,24 +142,24 @@ $$\text{Axum SSE Stream} \xrightarrow{\text{EventSource / Fetch}} \textbf{RxJS O
 * **Transactional Event Store:** **SierraDB** (`sierradb`), pure-Rust RESP3 distributed event store providing sub-millisecond atomic append operations (`EAPPEND`), event stream scanning (`ESCAN`), and version checks (`ESVER`) with optimistic concurrency control for `ferrous-cqrses` aggregates.
 * **Message Broker & Lakehouse Sinks:** **Apache Iggy** for ultra-high throughput event and conversation telemetry streaming with built-in native **`delta_sink`** connector streaming directly to Delta Lake Parquet tables in `/data/delta/` (`orders_raw_events`, `orders_current_state`, `olist_orders`, `hpc_benchmarks`) with strict `schema = "json"` invariants.
 * **CQRS-ES Engine (`ferrous-cqrses`):** Pure-Rust Domain-Driven CQRS/ES engine built on the `cqrs-es` crate. Under Topology A, `ferrous-api` hosts the synchronous `CommandHandler` backed by SierraDB (`EventStore`) enforcing invariants ($20 courtesy credit cap, lifecycle states) before committing atomic event streams (`EAPPEND`), and dispatches committed domain events to Apache Iggy (`orders/events`). The dedicated `order-projection` daemon consumes `orders/events` via consumer group `cg-order-projection`, constructs `ConsolidatedOrderProjection` snapshots, and emits them to `orders/consolidated` for Apache Iggy `delta_sink` Delta Lake table materialization.
-* **Asynchronous Saga Process Manager (`order-saga`):** Dedicated standalone daemon in `ferrous-cqrses` (`order-saga`) consuming domain events from Apache Iggy via consumer group `cg-order-saga`. Decouples long-running enterprise workflows (e.g. ERP financial settlement) from synchronous command handling and read projections. Dispatches outbound settlement requests with correlation tokens, exponential backoff, and retry limits, while `ferrous-api` hosts the M2M authenticated Webhook Ingress Gateway to process clearing callbacks and transition aggregate state.
+* **Asynchronous Saga Process Manager (`order-saga`):** Dedicated standalone daemon in `ferrous-cqrses` (`order-saga`) consuming domain events from Apache Iggy via consumer group `cg-order-saga`. Decouples long-running enterprise workflows from synchronous command handling and read projections. Dispatches outbound settlement requests with correlation tokens, exponential backoff, and retry limits, while `ferrous-api` hosts the M2M authenticated Webhook Ingress Gateway to process asynchronous callbacks and transition aggregate state.
 
 ### Enterprise Workflow & Asynchronous Saga Orchestration (Epic 18)
 
-To preserve the **CQRS/ES Replay Invariant**, read-side projections must remain strictly pure: replaying events during disaster recovery or read-model re-indexing must never trigger external side-effects (e.g., duplicated ERP financial transactions or duplicate emails).
+To preserve the **CQRS/ES Replay Invariant**, read-side projections must remain strictly pure: replaying events during disaster recovery or read-model re-indexing must never trigger external side-effects (e.g., duplicate workflow actions or side-effect calls).
 
 FerrousCX solves this through an asynchronous, event-driven Process Manager pattern:
 
 $$\begin{aligned}
 \text{Domain Event } (\texttt{CreditIssuedEvent}) &\xrightarrow{\text{Apache Iggy } (\texttt{orders/events})} \textbf{OrderSagaManager } (\texttt{cg-order-saga}) \\
-&\xrightarrow[\text{Exponential Backoff}]{\text{Outbound HTTP POST}} \textbf{Enterprise ERP / Gateway} \\
+&\xrightarrow[\text{Exponential Backoff}]{\text{Outbound HTTP POST}} \textbf{Enterprise Workflow / Backend System} \\
 &\xrightarrow[\text{Kanidm M2M Bearer Token}]{\text{Async Webhook Callback}} \textbf{Ferrous API Gateway } (\texttt{/api/v1/webhooks/orders/settlement-callback}) \\
 &\xrightarrow{\text{Command Dispatch}} \textbf{SierraDB Event Store } (\texttt{EAPPEND } \rightarrow \texttt{CourtesyCreditSettled})
 \end{aligned}$$
 
 1. **Decoupled Consumer Groups:** `order-projection` operates under consumer group `cg-order-projection`, while `order-saga` operates under `cg-order-saga`. Projection lag or replays never disrupt or duplicate outbound saga dispatches.
 2. **Outbound Dispatcher with Backoff:** The saga daemon implements the `EnterpriseDispatcher` trait with configurable retries (`MAX_RETRIES`), exponential backoff (`BACKOFF_INITIAL_MS`, `BACKOFF_MAX_MS`), non-transient error classification (e.g. HTTP 4xx errors are acknowledged without infinite retrying), and capped response memory bounds (64KB).
-3. **M2M Authenticated Ingress Gateway:** External clearing callbacks post to `POST /api/v1/webhooks/orders/settlement-callback` in `ferrous-api`. Requests require Kanidm M2M Bearer tokens (`svc_ferrous_api`), validate payload schemas, and dispatch domain commands (`SettleCourtesyCreditCommand` or `FailCourtesyCreditSettlementCommand`) to atomically update the order aggregate in SierraDB.
+3. **M2M Authenticated Ingress Gateway:** External callbacks post to `POST /api/v1/webhooks/orders/settlement-callback` in `ferrous-api`. Requests require Kanidm M2M Bearer tokens (`svc_ferrous_api`), validate payload schemas, and dispatch domain commands (`SettleCourtesyCreditCommand` or `FailCourtesyCreditSettlementCommand`) to atomically update the order aggregate in SierraDB.
 
 ### Direct `rig` + `DataFusion` Integration
 Tools implement `rig::tool::Tool` and directly hold an `Arc<SessionContext>`:
@@ -463,7 +466,7 @@ docker compose ps        # wait until ferrous-iam, iggy-broker, sierradb, and ve
 | Qdrant Vector DB | `http://localhost:6333/readyz` | Vector DB for SOPs & Transcripts |
 | Ferrous API Gateway | `http://localhost:8080/health` | Axum API + SSE + In-Process DataFusion |
 | Settlement Webhook Gateway | `http://localhost:8080/api/v1/webhooks/orders/settlement-callback` | M2M Async Settlement Ingress (Kanidm JWT) |
-| Order Saga Daemon | Internal (`cg-order-saga`) | Outbound Enterprise ERP Saga Orchestrator |
+| Order Saga Daemon | Internal (`cg-order-saga`) | Outbound Enterprise Saga Process Manager |
 | Frontend UI | `http://localhost:5173/` | Svelte 5 Operator Studio (read-only) |
 
 ### 5. Provision Topics, Consumer Groups, Delta Lake Storage, & IAM Personas
