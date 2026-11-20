@@ -35,54 +35,57 @@ FerrousCX follows strict **Command Query Responsibility Segregation (CQRS)** wit
 
 ### 1. Command & Domain Projection Execution Path (Write Flow)
 
-The Command path handles synchronous state-mutation requests, domain invariant validation, atomic event storage in SierraDB, and asynchronous enterprise orchestration via domain projections:
+The Command path handles synchronous state-mutation requests, domain invariant validation, atomic event storage in SierraDB, and asynchronous enterprise orchestration via domain projections and internal callback queues:
 
 ```mermaid
 flowchart TD
-    subgraph Client_Layer ["Client & Ingress"]
+    subgraph Client_Layer ["Client & Ingress (Public Perimeter)"]
         Client["Frontend Client<br/>(Svelte 5 + HITL Approval)"]
     end
 
-    subgraph API_Gateway ["API Service Gateway (ferrous-api)"]
-        ApiService["Axum API Gateway<br/>• Command Ingress: /api/v1/commands/...<br/>• Webhook Ingress: /webhooks/orders/..."]
+    subgraph API_Gateway ["API Service & Command Engine (ferrous-api)"]
+        ApiService["Axum API Gateway<br/>• Command Ingress: /api/v1/commands/...<br/>• Live SSE Broadcast"]
+        CallbackService["Callback Command Worker<br/>• Consumer Group: cg-order-callback<br/>• Invariant Validation & EAPPEND"]
     end
 
-    subgraph Event_Store ["Transactional Event Store"]
+    subgraph Event_Store ["Transactional Event Store (Internal)"]
         SierraDB[("SierraDB Event Store (Port 9090)<br/>• Pure-Rust RESP3 Protocol<br/>• ESCAN & EAPPEND (Atomic Commit)")]
     end
 
-    subgraph Event_Bus ["Message Broker & Event Bus (Apache Iggy)"]
-        Iggy["Apache Iggy Broker<br/>• Topic: orders/events<br/>• Native TCP (Port 8090)"]
+    subgraph Event_Bus ["Message Broker & Streaming Fabric (Apache Iggy)"]
+        IggyEvents["Topic: orders/events<br/>• Committed Domain Events"]
+        IggyCallbacks["Topic: orders/callbacks<br/>• Internal Callback Queue"]
     end
 
-    subgraph Projection_Tier ["Domain Projection (ferrous-cqrses)"]
-        DomainProjection["Domain Projection (order-saga)<br/>• Consumer Group: cg-order-saga<br/>• Outbound Dispatch with Backoff"]
+    subgraph Internal_Processing ["Domain Projection & Processing (ferrous-cqrses)"]
+        DomainProjection["Domain Projection (order-saga)<br/>• Consumer Group: cg-order-saga<br/>• Internal Network Orchestration"]
     end
 
-    subgraph External_Enterprise ["External Enterprise Systems"]
-        EnterpriseWorkflow["Enterprise Workflow / Backend System"]
+    subgraph Internal_Enterprise ["Internal Enterprise Network (Private / Non-Public)"]
+        EnterpriseWorkflow["Enterprise Workflow / Backend System<br/>(Internal SAP / ERP / Core Banking)"]
     end
 
     %% Command Lifecycle Flow
     Client -->|"1. Submit Command"| ApiService
     ApiService <-->|"2. Validate Invariants & Atomic Commit (EAPPEND)"| SierraDB
-    ApiService -->|"3. Publish Committed Event"| Iggy
+    ApiService -->|"3. Publish Committed Event"| IggyEvents
     ApiService -->|"4. Post-Commit SSE Stream"| Client
 
-    %% Domain Projection Outbound Dispatch
-    Iggy -->|"5. Consume CreditIssuedEvent"| DomainProjection
-    DomainProjection -->|"6. Outbound Dispatch (HTTP POST with backoff)"| EnterpriseWorkflow
+    %% Domain Projection Internal Orchestration
+    IggyEvents -->|"5. Consume CreditIssuedEvent"| DomainProjection
+    DomainProjection <-->|"6. Internal Orchestration & Response"| EnterpriseWorkflow
 
-    %% Asynchronous Webhook Callback Flow
-    EnterpriseWorkflow -->|"7. Asynchronous Callback"| ApiService
-    ApiService <-->|"8. Validate Callback & Atomic Commit (EAPPEND)"| SierraDB
-    ApiService -->|"9. Publish Settled Event"| Iggy
+    %% Internal Queue Callback Flow
+    DomainProjection -->|"7. Publish Response Message"| IggyCallbacks
+    IggyCallbacks -->|"8. Consume Callback (cg-order-callback)"| CallbackService
+    CallbackService <-->|"9. Validate Aggregate & Atomic Commit (EAPPEND)"| SierraDB
+    CallbackService -->|"10. Publish Settled Event"| IggyEvents
 ```
 
 * **Synchronous Command Ingestion:** The client dispatches commands (e.g. `IssueCourtesyCreditCommand`). `ferrous-api` checks invariants ($20 cumulative credit ceiling, order status constraints) and commits events atomically via `EAPPEND` to SierraDB.
 * **Deterministic Event Emission:** Once committed to SierraDB, domain events are published to Apache Iggy (`orders/events`) and streamed live to the client via Axum SSE.
-* **Asynchronous Domain Projection Outbound:** The `Domain Projection` (`order-saga` daemon) consumes `CreditIssuedEvent` under consumer group `cg-order-saga` and dispatches an outbound request with exponential backoff to the `Enterprise Workflow / Backend System`.
-* **Asynchronous Webhook Callback Ingress (Pattern A with SierraDB):** The external enterprise workflow posts its settlement callback directly to `POST /api/v1/webhooks/orders/settlement-callback` in `ferrous-api`. `ferrous-api` validates the callback payload against domain invariants, executes `SettleCourtesyCreditCommand` or `FailCourtesyCreditSettlementCommand`, and atomically commits the event to SierraDB via `EAPPEND`, emitting the terminal event to Apache Iggy (`orders/events`).
+* **Internal Enterprise Orchestration via Domain Projection:** External/internal enterprise backend systems (SAP, ERP, mainframes) sit inside a private corporate network and cannot call public-facing API servers. The `Domain Projection` (`order-saga` daemon) runs in the private network, consumes `CreditIssuedEvent` under consumer group `cg-order-saga`, and orchestrates directly with the `Enterprise Workflow / Backend System`.
+* **Iggy Callback Topic Ingress through Projection:** When the enterprise workflow responds, the `Domain Projection` relays the response to the Apache Iggy callback topic (`orders/callbacks`). The `Callback Command Worker` in `ferrous-api` consumes from `orders/callbacks` under consumer group `cg-order-callback`, validates domain invariants against SierraDB, and atomically commits `CourtesyCreditSettled` or `CourtesyCreditSettlementFailed` via `EAPPEND`, emitting the terminal event to `orders/events`.
 
 ---
 
@@ -194,24 +197,25 @@ $$\text{Axum SSE Stream} \xrightarrow{\text{EventSource / Fetch}} \textbf{RxJS O
 * **Transactional Event Store:** **SierraDB** (`sierradb`), pure-Rust RESP3 distributed event store providing sub-millisecond atomic append operations (`EAPPEND`), event stream scanning (`ESCAN`), and version checks (`ESVER`) with optimistic concurrency control for `ferrous-cqrses` aggregates.
 * **Message Broker & Lakehouse Sinks:** **Apache Iggy** for ultra-high throughput event and conversation telemetry streaming with built-in native **`delta_sink`** connector streaming directly to Delta Lake Parquet tables in `/data/delta/` (`orders_raw_events`, `orders_current_state`, `olist_orders`, `hpc_benchmarks`) with strict `schema = "json"` invariants.
 * **CQRS-ES Engine (`ferrous-cqrses`):** Pure-Rust Domain-Driven CQRS/ES engine built on the `cqrs-es` crate. Under Topology A, `ferrous-api` hosts the synchronous `CommandHandler` backed by SierraDB (`EventStore`) enforcing invariants ($20 courtesy credit cap, lifecycle states) before committing atomic event streams (`EAPPEND`), and dispatches committed domain events to Apache Iggy (`orders/events`). The dedicated `order-projection` daemon consumes `orders/events` via consumer group `cg-order-projection`, constructs `ConsolidatedOrderProjection` snapshots, and emits them to `orders/consolidated` for Apache Iggy `delta_sink` Delta Lake table materialization.
-* **Domain Projection (`order-saga`):** Dedicated standalone daemon in `ferrous-cqrses` (`order-saga`) consuming domain events from Apache Iggy via consumer group `cg-order-saga`. Decouples long-running enterprise workflows from synchronous command handling and read projections. Dispatches outbound settlement requests with correlation tokens, exponential backoff, and retry limits, while `ferrous-api` hosts the Webhook Ingress Gateway to process asynchronous callbacks into SierraDB.
+* **Domain Projection (`order-saga`):** Dedicated standalone daemon in `ferrous-cqrses` (`order-saga`) consuming domain events from Apache Iggy via consumer group `cg-order-saga`. Residing inside the private enterprise network, it orchestrates directly with internal enterprise workflows (SAP, ERP, mainframes) and relays responses to Apache Iggy (`orders/callbacks`) for asynchronous command processing in `ferrous-api`.
 
 ### Enterprise Workflow & Domain Projection Orchestration (Epic 18)
 
 To preserve the **CQRS/ES Replay Invariant**, read-side projections must remain strictly pure: replaying events during disaster recovery or read-model re-indexing must never trigger external side-effects (e.g., duplicate workflow actions or side-effect calls).
 
-FerrousCX solves this through an asynchronous, event-driven Domain Projection pattern (Pattern A with SierraDB):
+FerrousCX solves this through an internal-network Domain Projection and callback queue pattern:
 
 $$\begin{aligned}
 \text{Domain Event } (\texttt{CreditIssuedEvent}) &\xrightarrow{\text{Apache Iggy } (\texttt{orders/events})} \textbf{Domain Projection } (\texttt{cg-order-saga}) \\
-&\xrightarrow[\text{Exponential Backoff}]{\text{Outbound HTTP POST}} \textbf{Enterprise Workflow / Backend System} \\
-&\xrightarrow{\text{Async Webhook Callback}} \textbf{Ferrous API Gateway } (\texttt{/api/v1/webhooks/orders/settlement-callback}) \\
+&\xleftrightarrow{\text{Internal Enterprise Network}} \textbf{Enterprise Workflow / Backend System} \\
+&\xrightarrow{\text{Publish Response Message}} \textbf{Apache Iggy Callback Queue } (\texttt{orders/callbacks}) \\
+&\xrightarrow{\text{cg-order-callback}} \textbf{Callback Command Worker } (\texttt{ferrous-api}) \\
 &\xrightarrow{\text{Command Dispatch}} \textbf{SierraDB Event Store } (\texttt{EAPPEND } \rightarrow \texttt{CourtesyCreditSettled})
 \end{aligned}$$
 
 1. **Decoupled Consumer Groups:** `order-projection` operates under consumer group `cg-order-projection`, while `Domain Projection` (`order-saga`) operates under `cg-order-saga`. Projection lag or replays never disrupt or duplicate outbound saga dispatches.
-2. **Outbound Dispatcher with Backoff:** The domain projection daemon implements the `EnterpriseDispatcher` trait with configurable retries (`MAX_RETRIES`), exponential backoff (`BACKOFF_INITIAL_MS`, `BACKOFF_MAX_MS`), non-transient error classification (e.g. HTTP 4xx errors are acknowledged without infinite retrying), and capped response memory bounds (64KB).
-3. **Webhook Ingress Gateway:** External callbacks post directly to `POST /api/v1/webhooks/orders/settlement-callback` in `ferrous-api`. Requests validate payload schemas and dispatch domain commands (`SettleCourtesyCreditCommand` or `FailCourtesyCreditSettlementCommand`) to atomically update the order aggregate in SierraDB.
+2. **Internal Network Security:** Core enterprise backends remain shielded behind corporate firewalls with zero public API exposure. The internal `Domain Projection` worker manages enterprise integration and dispatches outbound calls with exponential backoff and retry limits.
+3. **Iggy Callback Queue Ingress:** Enterprise workflow responses are queued into Apache Iggy under topic `orders/callbacks`. The `Callback Command Worker` in `ferrous-api` consumes payloads under consumer group `cg-order-callback`, validates aggregate invariants against SierraDB, and executes `SettleCourtesyCreditCommand` or `FailCourtesyCreditSettlementCommand` to atomically commit the terminal settlement event to SierraDB via `EAPPEND`.
 
 ### Direct `rig` + `DataFusion` Integration
 Tools implement `rig::tool::Tool` and directly hold an `Arc<SessionContext>`:
