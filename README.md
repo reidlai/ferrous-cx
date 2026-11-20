@@ -49,6 +49,7 @@ flowchart TD
         Command["Domain Command<br/>• IssueCourtesyCreditCommand<br/>• SettleCourtesyCreditCommand"]
         CommandHandler["OrderCommandHandler<br/>• 1. ESCAN from SierraDB<br/>• 2. Rehydrate Aggregate<br/>• 3. Invariant Evaluation<br/>• 4. EAPPEND to SierraDB<br/>• 5. Publish to Iggy Topic"]
         Aggregate["OrderAggregate (Domain Model)<br/>• State: Status, Cumulative Credit<br/>• Invariant: Max $20 credit ceiling<br/>• Produces: CourtesyCreditIssued / Settled"]
+        CallbackWorker["Callback Command Worker<br/>• Consumer Group: cg-order-callback<br/>• Generates SettleCourtesyCreditCommand"]
     end
 
     subgraph Storage_Tier ["Transactional Event Store (Internal)"]
@@ -66,10 +67,6 @@ flowchart TD
 
     subgraph Enterprise_Tier ["Internal Enterprise Network (Private / Non-Public)"]
         EnterpriseWorkflow["Enterprise Workflow / ERP System<br/>(Internal SAP / Core Banking)"]
-    end
-
-    subgraph Callback_Loop ["Asynchronous Callback Ingress (ferrous-api)"]
-        CallbackWorker["Callback Command Worker<br/>• Consumer Group: cg-order-callback<br/>• Generates SettleCourtesyCreditCommand"]
     end
 
     %% Step 1: User Command Ingestion
