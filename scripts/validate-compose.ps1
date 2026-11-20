@@ -46,7 +46,7 @@ Write-Host "  [OK] docker-compose.yml passed Compose v2 validation." -Foreground
 # 3. Validate Day-0 Hardened Runtime Defense Constraints (AD-24)
 Write-Host "`n[3/4] Auditing Day-0 kernel hardening constraints (AD-24)..." -ForegroundColor Green
 
-$requiredServices = @("command-handler", "ferrous-api", "ferrous-agent", "ferrous-frontend", "ferrous-reverseproxy")
+$requiredServices = @("order-projection", "ferrous-api", "ferrous-agent", "ferrous-frontend", "ferrous-reverseproxy")
 foreach ($svc in $requiredServices) {
     if ($ComposeContent -notmatch "(?ms)${svc}:.*?read_only:\s*true") {
         throw "Service $svc is missing 'read_only: true'"
@@ -77,11 +77,17 @@ if ($ComposeContent -notmatch "(?ms)ferrous-frontend:.*?ferrous-iam:\s*condition
 if ($ComposeContent -notmatch "(?ms)ferrous-api:.*?iggy-broker:\s*condition:\s*service_healthy") {
     throw "ferrous-api must depend on iggy-broker (service_healthy)"
 }
+if ($ComposeContent -notmatch "(?ms)ferrous-api:.*?sierradb:\s*condition:\s*service_healthy") {
+    throw "ferrous-api must depend on sierradb (service_healthy)"
+}
 if ($ComposeContent -notmatch "(?ms)ferrous-api:.*?ferrous-iam:\s*condition:\s*service_healthy") {
     throw "ferrous-api must depend on ferrous-iam (service_healthy)"
 }
-if ($ComposeContent -notmatch "(?ms)command-handler:.*?iggy-broker:\s*condition:\s*service_healthy") {
-    throw "command-handler must depend on iggy-broker (service_healthy)"
+if ($ComposeContent -notmatch "(?ms)order-projection:.*?iggy-broker:\s*condition:\s*service_healthy") {
+    throw "order-projection must depend on iggy-broker (service_healthy)"
+}
+if ($ComposeContent -notmatch "(?ms)order-projection:.*?sierradb:\s*condition:\s*service_healthy") {
+    throw "order-projection must depend on sierradb (service_healthy)"
 }
 Write-Host "  [OK] Healthcheck graph enforces deterministic startup sequence." -ForegroundColor Green
 

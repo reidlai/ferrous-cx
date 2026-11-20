@@ -1,0 +1,45 @@
+# ==============================================================================
+# Apache Iggy Native Delta Lake Sink Connector Configuration (Story 17.3, AD-28b)
+# Streams JSON records directly to Delta Lake Parquet tables in /data/delta/
+# ==============================================================================
+
+[connector]
+name = "delta_sink"
+type = "sink"
+plugin = "delta_sink"
+enabled = true
+
+[iggy]
+server_address = "127.0.0.1:8090"
+username = "iggy"
+password = "iggy"
+
+# 1. Orders Raw Events Sink: orders/intake -> /data/delta/orders_raw_events
+[[sinks]]
+name = "orders_raw_events_sink"
+stream = "orders"
+topic = "intake"
+schema = "json"
+table_uri = "/data/delta/orders_raw_events"
+batch_size = 1000
+batch_timeout_ms = 1000
+
+# 2. Orders Current State Sink: orders/consolidated -> /data/delta/orders_current_state
+[[sinks]]
+name = "orders_current_state_sink"
+stream = "orders"
+topic = "consolidated"
+schema = "json"
+table_uri = "/data/delta/orders_current_state"
+batch_size = 1000
+batch_timeout_ms = 1000
+
+# 3. Olist Orders Historical Replay Sink: olist/orders_stream -> /data/delta/olist_orders
+[[sinks]]
+name = "olist_orders_sink"
+stream = "olist"
+topic = "orders_stream"
+schema = "json"
+table_uri = "/data/delta/olist_orders"
+batch_size = 1000
+batch_timeout_ms = 1000
