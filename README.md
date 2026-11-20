@@ -37,7 +37,7 @@ To clearly understand the operational boundaries and how domain components colla
 
 ### 1. CQRS / ES Component Collaboration (Write & Saga Execution Path)
 
-The Write Path demonstrates how **Command**, **Command Handler**, **Aggregate**, **Event Store (SierraDB)**, and **Projections (Iggy & Domain Saga)** collaborate to enforce business invariants and coordinate distributed enterprise workflows:
+The Write Path demonstrates how **Command**, **Command Handler**, **Aggregate**, **Event Store (SierraDB)**, and **Projections (Iggy, Domain Saga, & delta-rs)** collaborate to enforce business invariants, update read-model persistence, and coordinate distributed enterprise workflows:
 
 ```mermaid
 flowchart TD
@@ -64,8 +64,13 @@ flowchart TD
         IggyCallbacks["Topic: orders/callbacks<br/>• Internal Enterprise Responses<br/>(CreditSettlementResponse)"]
     end
 
-    subgraph Projection_Tier ["Domain Projections & Saga (ferrous-cqrses)"]
+    subgraph Projection_Tier ["Projections & Saga Daemon (ferrous-cqrses)"]
+        OrderProjection["Order Projection (order-projection)<br/>• Consumer Group: cg-order-projection<br/>• Pure Event Folding"]
         DomainProjection["Domain Projection (order-saga)<br/>• Consumer Group: cg-order-saga<br/>• Private Network Orchestrator"]
+    end
+
+    subgraph Lakehouse_Tier ["Analytical Lakehouse Storage"]
+        DeltaLake[("Delta Lake Storage (/data/delta)<br/>• orders_current_state (Snapshots)<br/>• orders_raw_events (Audit Log)")]
     end
 
     subgraph Enterprise_Tier ["Internal Enterprise Network (Private / Non-Public)"]
@@ -75,20 +80,25 @@ flowchart TD
     Client_Tier ~~~ API_Tier
     API_Tier ~~~ Streaming_Fabric
     Streaming_Fabric ~~~ Projection_Tier
+    Projection_Tier ~~~ Lakehouse_Tier
     Projection_Tier ~~~ Enterprise_Tier    
 
     %% Step 1: User Command Ingestion
     Client -->|"1. Submit Request"| Command
     CommandHandler -.->|"Live SSE Update"| Client
 
-    %% Step 2: Domain Projection Consumption
-    IggyEvents -->|"10. Consume CreditIssuedEvent"| DomainProjection
-    DomainProjection -->|"11. Private Network Execution"| EnterpriseWorkflow
+    %% Step 2: Projections & Delta Lake Write
+    IggyEvents -->|"10a. Consume orders/events"| OrderProjection
+    OrderProjection -->|"11a. Commit Snapshots via delta-rs"| DeltaLake
 
-    %% Step 3: Callback Queue Placement
+    %% Step 3: Domain Projection Consumption
+    IggyEvents -->|"10b. Consume CreditIssuedEvent"| DomainProjection
+    DomainProjection -->|"11b. Private Network Execution"| EnterpriseWorkflow
+
+    %% Step 4: Callback Queue Placement
     DomainProjection -->|"12. Place Response Payload"| IggyCallbacks
 
-    %% Step 4: Callback to Command Loop
+    %% Step 5: Callback to Command Loop
     IggyCallbacks -->|"13. Consume Callback Message"| CallbackWorker
     CallbackWorker -->|"14. Construct Settle Command"| Command
 ```
@@ -102,62 +112,60 @@ flowchart TD
 | **Aggregate** | `OrderAggregate`<br/>(`ferrous-cqrses/src/domain/order/aggregate.rs`) | **Guardian of Invariants:** Domain entity maintaining internal state purely from past events. Evaluates business rules: e.g. **maximum $20 cumulative courtesy credit**, order lifecycle state compatibility (`Delivered`/`InTransit`), and emits uncommitted **Domain Events** (`CourtesyCreditIssued`). |
 | **Event Store** | `SierraDB` (Port 9090)<br/>(`sierra.rs`) | **Single Source of Truth:** Pure-Rust RESP3 append-only log. Ensures linear, atomic event ordering without table locks. |
 | **Domain Events** | `CourtesyCreditIssued`<br/>`CourtesyCreditSettled` | **Facts:** Immutable historical records published to Apache Iggy (`orders/events`) once durably committed to SierraDB. |
+| **Read Projection** | `order-projection`<br/>(`ferrous-cqrses/src/bin/order_projection.rs`) | **Read Model Materializer:** Consumes `orders/events` under consumer group `cg-order-projection`, purely folds events into state snapshots, and persists `orders_current_state` directly to **Delta Lake via `delta-rs`**. |
 | **Domain Projection** | `order-saga`<br/>(`ferrous-cqrses/src/bin/order_saga.rs`) | **Process Manager (Saga):** Listens to `orders/events`, coordinates long-running side-effects with private internal enterprise backends (ERP, SAP), and deposits completed responses onto `orders/callbacks`. |
 | **Callback Loop** | `Callback Command Worker`<br/>(`ferrous-api`) | **Closing the Loop:** Consumes enterprise responses from `orders/callbacks`, transforms them into a **`SettleCourtesyCreditCommand`**, and routes them back through the **Command Handler** to validate against the **Aggregate** and atomically commit terminal events to **SierraDB**. |
 
 ---
 
-### 2. Query, Projection & Lakehouse Path (Read Flow)
+### 2. Query, Analytical & Agentic Path (Read Flow)
 
-The Query path handles live event-driven projections, automated Delta Lake Parquet materialization, historical traffic replay, and sub-3ms analytical querying via embedded DataFusion:
+The Read Path focuses exclusively on low-latency analytical querying and conversational AI retrieval against Delta Lake and the vector knowledge base:
 
 ```mermaid
 flowchart TD
-    subgraph Traffic_Simulation ["External Traffic Generation"]
-        Replayer["Traffic Replayer (stream-replay-rs)<br/>• Olist Dataset Replay (Speed / Rate)"]
+    subgraph Frontend_Read ["Client Presentation Tier"]
+        ClientUI["Frontend Client (Svelte 5)<br/>• 3-Column Operational Canvas<br/>• Orders Workbench & AI Copilot Canvas"]
     end
 
-    subgraph Streaming_Bus ["Message Broker (Apache Iggy)"]
-        IggyEvents["Apache Iggy Broker (Port 8090)<br/>• Topic: orders/events<br/>• Topic: orders/consolidated<br/>• Topic: olist/*"]
-        DeltaSink["Built-in delta_sink Connector<br/>• Strict schema = 'json' Invariant"]
+    subgraph API_and_Agent_Tier ["API Service & Agent Core (ferrous-api / ferrous-agent)"]
+        ApiQuery["Axum REST / GraphQL Endpoints<br/>• Order Detail, Status & Timeline Lookups<br/>• SLA Radar & Analytics Aggregations"]
+        AgentCore["Ferrous Agent Core (ferrous-agent)<br/>• rig-core LLM Orchestration<br/>• Transparent Agentic Sidecar"]
     end
 
-    subgraph Projection_Tier ["Read Model Projection (ferrous-cqrses)"]
-        OrderProjection["Order Projection Daemon (order-projection)<br/>• Consumer Group: cg-order-projection<br/>• Pure Event Folding (Zero Side-Effects)"]
+    subgraph Query_Engine_Tier ["Embedded Analytical Engine (In-Process)"]
+        DataFusion["Embedded Apache DataFusion<br/>(in-process SessionContext in ferrous-api / ferrous-agent)<br/>• Vectorized SQL Execution (<3ms P95)<br/>• Extensible TableProvider Catalog"]
     end
 
-    subgraph Storage_Tier ["Delta Lakehouse Storage (Parquet)"]
-        DeltaLake[("Delta Lake Storage (/data/delta)<br/>• orders_current_state (Snapshots)<br/>• orders_raw_events (Audit Log)<br/>• olist_orders (Historical Replay)<br/>• hpc_benchmarks (Metrics)")]
+    subgraph Storage_Tier ["Lakehouse & Knowledge Storage"]
+        DeltaLake[("Delta Lake Storage (/data/delta)<br/>• orders_current_state (Materialized Views)<br/>• orders_raw_events (Immutable Audit Log)<br/>• olist_orders (Historical Replay Dataset)<br/>• hpc_benchmarks (Execution Metrics)")]
+        VectorDB[("Qdrant Vector DB (Port 6333)<br/>• SOPs, Policy Docs & Chat Transcripts<br/>• Fast HNSW Vector Similarity Search")]
     end
 
-    subgraph Analytics_and_AI ["Analytical & Agentic Query Engine"]
-        DataFusion["Embedded Apache DataFusion<br/>(in-process in ferrous-api / ferrous-agent)<br/>• Vectorized SQL Scan (<3ms)"]
-        VectorDB[("Qdrant Vector DB (ferrous-vectordb:6333)<br/>• SOPs & Support Transcripts")]
-        AgentCore["Ferrous Agent Core (ferrous-agent)<br/>• rig-core LLM Orchestration"]
-    end
+    Frontend_Read ~~~ API_and_Agent_Tier
+    API_and_Agent_Tier ~~~ Query_Engine_Tier
+    Query_Engine_Tier ~~~ Storage_Tier
 
-    subgraph Frontend_Read ["Client Presentation"]
-        ClientUI["Frontend Client (Svelte 5)<br/>• 3-Column Operational Canvas<br/>• Read-only Replay & Order Monitor"]
-    end
+    %% Client Ingress
+    ClientUI -->|"1. Operational Query (HTTP / REST)"| ApiQuery
+    ClientUI -->|"2. Agentic Prompts & Copilot Requests"| AgentCore
 
-    %% Replay & Projection Flow
-    Replayer -->|"1. Replay Ingestion (Native TCP: 8090)"| IggyEvents
-    IggyEvents -->|"2. Consume orders/events"| OrderProjection
-    OrderProjection -->|"3. Publish Consolidated Snapshots"| IggyEvents
-    IggyEvents -->|"4. Batch Micro-Sink"| DeltaSink
-    DeltaSink -->|"5. Direct Parquet Commit (delta-rs log)"| DeltaLake
+    %% In-Process DataFusion Execution
+    ApiQuery -->|"3. In-Process SQL Execution (<3ms)"| DataFusion
+    AgentCore -->|"4. Execute Analytical Tool (SQL)"| DataFusion
+    AgentCore -.->|"5. Vector Similarity Search"| VectorDB
 
-    %% Query & Analysis Flow
-    ClientUI -->|"6. Analytical Queries & Copilot Prompts"| AgentCore
-    AgentCore -.->|"Vector Similarity Search"| VectorDB
-    AgentCore -->|"In-Process SQL Scan (<3ms)"| DataFusion
-    DataFusion -->|"Vectorized Parquet Read"| DeltaLake
-    AgentCore -->|"7. Stream Response & Workbench State"| ClientUI
+    %% Vectorized Lakehouse Parquet Scan
+    DataFusion -->|"6. Vectorized Parquet Scan (delta-rs log)"| DeltaLake
+
+    %% Stream & Result Delivery
+    ApiQuery -->|"7. Return Order State & Analytics"| ClientUI
+    AgentCore -->|"8. Stream LLM Reasoning & Workbench Data"| ClientUI
 ```
 
-* **Pure Read Projections:** The `order-projection` daemon consumes `orders/events` under consumer group `cg-order-projection`. It purely folds domain events into `ConsolidatedOrderProjection` state and emits snapshots to `orders/consolidated`. Projections have zero outbound side effects, preserving replay invariance.
-* **Direct Delta Lake Ingestion:** Apache Iggy's native `delta_sink` connector micro-batches stream records directly into Delta Lake Parquet tables (`orders_raw_events`, `orders_current_state`, `olist_orders`, `hpc_benchmarks`) in `/data/delta/`.
-* **Sub-3ms Analytical & Agentic Scans:** `ferrous-api` and `ferrous-agent` query Delta Lake tables using embedded in-process **Apache DataFusion** (<3ms SQL execution) and enrich context with SOP embeddings from Qdrant Vector DB.
+* **Sub-3ms Analytical Querying:** `ferrous-api` and `ferrous-agent` host in-process **Apache DataFusion** instances. Queries against `orders_current_state` and `orders_raw_events` execute in sub-3ms P95 latency via vectorized scans over Parquet files, without intermediate database proxies or serialization overhead.
+* **Agentic Context Enrichment:** When customer service agents interact with the AI sidecar, `ferrous-agent` combines DataFusion SQL query results from Delta Lake with semantic SOP retrievals from **Qdrant Vector DB**, presenting live synthesized context on the Svelte 5 workbench.
+* **Separation of Concerns:** The Read Model contains zero write-side stream processing, ingestion pipelines, or replayer plumbing, ensuring a clean decoupling between the command execution path and query engine retrieval.
 
 ---
 
