@@ -160,6 +160,10 @@ services:
       - TOPIC_ORDERS_CONSOLIDATED=consolidated
       - CONSUMER_GROUP=cg-order-projection
       - SIERRADB_URL=${SIERRADB_URL:-redis://sierradb:9090}
+    deploy:
+      resources:
+        limits:
+          memory: 256M
     depends_on:
       iggy-broker:
         condition: service_healthy
@@ -167,7 +171,54 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "/order_projection", "--healthcheck"]
-      interval: 30s
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # 3b. Asynchronous Saga Process Manager Daemon (Day-0 Defense)
+  order-saga:
+    build:
+      context: ../ferrous-cqrses
+      dockerfile: Dockerfile.order_saga
+    image: ferrous-cqrses-order-saga:latest
+    container_name: ferrous-cqrses-order-saga
+    user: "10001:10001"
+    restart: unless-stopped
+    # Day-0 Hardened Runtime Defense Constraints (AD-24)
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev,size=64M
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    environment:
+      - IGGY_SERVER_ADDRESS=${IGGY_SERVER_ADDRESS:-iggy-broker:8090}
+      - IGGY_USERNAME=${IGGY_USERNAME:-iggy}
+      - IGGY_PASSWORD=${IGGY_PASSWORD:-iggy}
+      - STREAM_NAME=orders
+      - TOPIC_ORDERS_EVENTS=events
+      - CONSUMER_GROUP=cg-order-saga
+      - ENTERPRISE_SETTLEMENT_URL=${ENTERPRISE_SETTLEMENT_URL:-http://ferrous-api:8080/api/v1/webhooks/orders/settlement-callback}
+      - ENTERPRISE_AUTH_TOKEN=${KANIDM_SERVICE_TOKEN:-}
+      - MAX_RETRIES=3
+      - BACKOFF_INITIAL_MS=100
+      - BACKOFF_MAX_MS=2000
+    depends_on:
+      iggy-broker:
+        condition: service_healthy
+      sierradb:
+        condition: service_healthy
+      ferrous-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/order_saga", "--healthcheck"]
+      interval: 10s
       timeout: 5s
       retries: 3
       start_period: 5s
