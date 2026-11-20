@@ -55,7 +55,7 @@ flowchart TD
         Command -->|"2. Dispatch to Handler"| CommandHandler
         SierraDB -->|"3. Rehydrate Aggregate"| Aggregate        
         Aggregate -->|"4. State to Handler"| CommandHandler
-        CommandHandler -->|"5. Invariant Check"| Aggregate
+        CommandHandler -->|"5. Invariant Evaluation"| Aggregate
         CommandHandler -->|"6. EAPPEND Save to Stream"| SierraDB
         CommandHandler -->|"7. Publish to Iggy Topic"| IggyEvents
     end
