@@ -29,7 +29,7 @@
 
 ## 🏛️ System Architecture Topology
 
-The end-to-end dataflow across FerrousCX unites historical lakehouse analytics, high-throughput event replay, sub-millisecond CQRS-ES transaction processing, and pure-Rust identity management:
+The end-to-end dataflow across FerrousCX unites historical lakehouse analytics, high-throughput event replay, sub-millisecond CQRS-ES transaction processing, pure-Rust identity management, and asynchronous enterprise saga orchestration:
 
 ```mermaid
 flowchart TD
@@ -51,7 +51,7 @@ flowchart TD
 
         ApiService -->|"2. Publish Committed Events (orders/events)"| Iggy
         OrderProjection["Order Projection Daemon<br/>(ferrous-cqrses / order-projection)"]
-        Iggy -->|"Consume orders/events"| OrderProjection
+        Iggy -->|"Consume orders/events (cg-order-projection)"| OrderProjection
         OrderProjection -->|"Publish Snapshots (orders/consolidated)"| Iggy
         Iggy -->|"Stream Records (orders/consolidated, olist/*)"| DeltaSink
 
@@ -60,6 +60,15 @@ flowchart TD
 
         DataFusion["Embedded Apache DataFusion<br/>(in-process in ferrous-api)"]
         DeltaLake -->|"Vectorized SQL Scan (<3ms)"| DataFusion
+    end
+
+    subgraph Saga_Tier ["Enterprise Workflow & Saga Orchestration Tier (Epic 18)"]
+        OrderSaga["Order Saga Process Manager<br/>(ferrous-cqrses / order-saga)<br/>• Consumer Group: cg-order-saga<br/>• Heartbeat Healthcheck & Backoff"]
+        EnterpriseERP["Enterprise ERP / Financial Clearing<br/>(Outbound Settlement Gateway)"]
+
+        Iggy -->|"3. Consume CreditIssuedEvent (orders/events)"| OrderSaga
+        OrderSaga -->|"4. Outbound Dispatch (POST /settlement with retries)"| EnterpriseERP
+        EnterpriseERP -->|"5. Asynchronous Settlement Callback"| ApiService
     end
 
     subgraph IAM_Layer ["Authentication & Access Control (Pure Rust)"]
@@ -71,6 +80,7 @@ flowchart TD
     ApiService -.->|"Historical Analytical Queries"| DataFusion
     Client -.->|"OIDC PKCE Login / Bearer JWT"| IAM
     ApiService -.->|"Cached JWKS Signature Check"| IAM
+    EnterpriseERP -.->|"M2M Bearer Token (svc_ferrous_api)"| IAM
 ```
 
 ---
@@ -128,7 +138,25 @@ $$\text{Axum SSE Stream} \xrightarrow{\text{EventSource / Fetch}} \textbf{RxJS O
 * **Analytical Query Engine:** **Apache DataFusion** executing vectorized SQL scans in <3ms directly against Delta Lake Parquet tables, embedded in-process in `ferrous-api` and `ferrous-cqrses` for sub-millisecond historical analytics.
 * **Transactional Event Store:** **SierraDB** (`sierradb`), pure-Rust RESP3 distributed event store providing sub-millisecond atomic append operations (`EAPPEND`), event stream scanning (`ESCAN`), and version checks (`ESVER`) with optimistic concurrency control for `ferrous-cqrses` aggregates.
 * **Message Broker & Lakehouse Sinks:** **Apache Iggy** for ultra-high throughput event and conversation telemetry streaming with built-in native **`delta_sink`** connector streaming directly to Delta Lake Parquet tables in `/data/delta/` (`orders_raw_events`, `orders_current_state`, `olist_orders`, `hpc_benchmarks`) with strict `schema = "json"` invariants.
-* **CQRS-ES Engine (`ferrous-cqrses`):** Pure-Rust Domain-Driven CQRS/ES engine built on the `cqrs-es` crate. Under Topology A, `ferrous-api` hosts the synchronous `CommandHandler` backed by SierraDB (`EventStore`) enforcing invariants ($20 courtesy credit cap, lifecycle states) before committing atomic event streams (`EAPPEND`), and dispatches committed domain events to Apache Iggy (`orders/events`). The dedicated `order-projection` daemon consumes `orders/events`, constructs `ConsolidatedOrderProjection` snapshots, and emits them to `orders/consolidated` for Apache Iggy `delta_sink` Delta Lake table materialization.
+* **CQRS-ES Engine (`ferrous-cqrses`):** Pure-Rust Domain-Driven CQRS/ES engine built on the `cqrs-es` crate. Under Topology A, `ferrous-api` hosts the synchronous `CommandHandler` backed by SierraDB (`EventStore`) enforcing invariants ($20 courtesy credit cap, lifecycle states) before committing atomic event streams (`EAPPEND`), and dispatches committed domain events to Apache Iggy (`orders/events`). The dedicated `order-projection` daemon consumes `orders/events` via consumer group `cg-order-projection`, constructs `ConsolidatedOrderProjection` snapshots, and emits them to `orders/consolidated` for Apache Iggy `delta_sink` Delta Lake table materialization.
+* **Asynchronous Saga Process Manager (`order-saga`):** Dedicated standalone daemon in `ferrous-cqrses` (`order-saga`) consuming domain events from Apache Iggy via consumer group `cg-order-saga`. Decouples long-running enterprise workflows (e.g. ERP financial settlement) from synchronous command handling and read projections. Dispatches outbound settlement requests with correlation tokens, exponential backoff, and retry limits, while `ferrous-api` hosts the M2M authenticated Webhook Ingress Gateway to process clearing callbacks and transition aggregate state.
+
+### Enterprise Workflow & Asynchronous Saga Orchestration (Epic 18)
+
+To preserve the **CQRS/ES Replay Invariant**, read-side projections must remain strictly pure: replaying events during disaster recovery or read-model re-indexing must never trigger external side-effects (e.g., duplicated ERP financial transactions or duplicate emails).
+
+FerrousCX solves this through an asynchronous, event-driven Process Manager pattern:
+
+$$\begin{aligned}
+\text{Domain Event } (\texttt{CreditIssuedEvent}) &\xrightarrow{\text{Apache Iggy } (\texttt{orders/events})} \textbf{OrderSagaManager } (\texttt{cg-order-saga}) \\
+&\xrightarrow[\text{Exponential Backoff}]{\text{Outbound HTTP POST}} \textbf{Enterprise ERP / Gateway} \\
+&\xrightarrow[\text{Kanidm M2M Bearer Token}]{\text{Async Webhook Callback}} \textbf{Ferrous API Gateway } (\texttt{/api/v1/webhooks/orders/settlement-callback}) \\
+&\xrightarrow{\text{Command Dispatch}} \textbf{SierraDB Event Store } (\texttt{EAPPEND } \rightarrow \texttt{CourtesyCreditSettled})
+\end{aligned}$$
+
+1. **Decoupled Consumer Groups:** `order-projection` operates under consumer group `cg-order-projection`, while `order-saga` operates under `cg-order-saga`. Projection lag or replays never disrupt or duplicate outbound saga dispatches.
+2. **Outbound Dispatcher with Backoff:** The saga daemon implements the `EnterpriseDispatcher` trait with configurable retries (`MAX_RETRIES`), exponential backoff (`BACKOFF_INITIAL_MS`, `BACKOFF_MAX_MS`), non-transient error classification (e.g. HTTP 4xx errors are acknowledged without infinite retrying), and capped response memory bounds (64KB).
+3. **M2M Authenticated Ingress Gateway:** External clearing callbacks post to `POST /api/v1/webhooks/orders/settlement-callback` in `ferrous-api`. Requests require Kanidm M2M Bearer tokens (`svc_ferrous_api`), validate payload schemas, and dispatch domain commands (`SettleCourtesyCreditCommand` or `FailCourtesyCreditSettlementCommand`) to atomically update the order aggregate in SierraDB.
 
 ### Direct `rig` + `DataFusion` Integration
 Tools implement `rig::tool::Tool` and directly hold an `Arc<SessionContext>`:
@@ -233,8 +261,8 @@ ferrous-cx/ (This Repository - Core Public Repository: demo config, runtime stac
 | **1** | **`stream-replay-rs`** | [`reidlai/stream-replay-rs`](https://github.com/reidlai/stream-replay-rs) | Independent, dataset-agnostic multi-sink traffic replayer with timestamp rebasing and speed control | Pure-Rust CLI & Library Crate |
 | **2** | **`ferrous-iam`** | [`reidlai/ferrous-iam`](https://github.com/reidlai/ferrous-iam) | Identity & Access Management container engine (Kanidm pure-Rust IdP, OIDC/OAuth2). Platform personas (`seed-rbac.json`, `seed-m2m.json`) and TLS certificates are decoupled into and managed by `ferrous-cx`. | Pure-Rust Kanidm / Docker |
 | **3** | **`ferrous-vectordb`** | [`reidlai/ferrous-vectordb`](https://github.com/reidlai/ferrous-vectordb) | Qdrant vector database indexing enterprise SOPs & support transcripts | Qdrant Vector DB / FastEmbed |
-| **4** | **`ferrous-cqrses`** | [`reidlai/ferrous-cqrses`](https://github.com/reidlai/ferrous-cqrses) | Domain-Driven CQRS/ES Library (`cqrs-es`) & Order Projection Service (`order-projection`) with SierraDB EventStore | Pure-Rust Library Crate & Service |
-| **5** | **`ferrous-api`** | [`reidlai/ferrous-api`](https://github.com/reidlai/ferrous-api) | Contract-First Axum API Service (Goa DSL, rust-axum, in-process DataFusion <3ms SQL, Axum SSE) | Goa v3 / Axum / DataFusion |
+| **4** | **`ferrous-cqrses`** | [`reidlai/ferrous-cqrses`](https://github.com/reidlai/ferrous-cqrses) | Domain-Driven CQRS/ES Library (`cqrs-es`), Order Projection Daemon (`order-projection`), and Asynchronous Saga Process Manager Daemon (`order-saga`) with SierraDB EventStore | Pure-Rust Library Crate & Daemons |
+| **5** | **`ferrous-api`** | [`reidlai/ferrous-api`](https://github.com/reidlai/ferrous-api) | Contract-First Axum API Service (Goa DSL, rust-axum, in-process DataFusion <3ms SQL, Axum SSE, M2M Settlement Webhook Gateway) | Goa v3 / Axum / DataFusion |
 | **6** | **`ferrous-agent`** | [`reidlai/ferrous-agent`](https://github.com/reidlai/ferrous-agent) | Pure-Rust Multi-Provider AI Engine (`rig-core`), Context Sanitizer & In-Process Benchmarks | `rig-core` / Context Sanitizer |
 | **7** | **`ferrous-frontend`** | [`reidlai/ferrous-frontend`](https://github.com/reidlai/ferrous-frontend) | Svelte 5 + shadcn-svelte 3-column UI workbench, including the read-only Replay Monitor | Svelte 5 / shadcn-svelte / RxJS / Tailwind |
 | **8** | **`ferrous-reverseproxy`** | [`reidlai/ferrous-reverseproxy`](https://github.com/reidlai/ferrous-reverseproxy) | Zentinel (Cloudflare Pingora) Edge Reverse Proxy, TLS 1.3 Termination & OWASP WAF | Pure-Rust Zentinel / Pingora / CRS |
@@ -249,7 +277,7 @@ ferrous-cx/ (This Repository - Core Public Repository: demo config, runtime stac
 `ferrous-cx` provides the unified integration, Day-0 security hardening, and developer runtime harness for the platform:
 
 1. **Zero-Daemon Local Development:** Launch the platform with a single `docker compose up -d`, requiring zero external host dependencies.
-2. **Explicit Healthcheck Dependency Graph:** Startup is gated with `condition: service_healthy`. `iggy-broker`, `sierradb`, and `ferrous-vectordb` boot first, then storage consumers, `order-projection` (`ferrous-cqrses`), the API gateway (`ferrous-api`, gated by `sierradb` and `iggy-broker`), reverse proxy and frontend. `ferrous-iam` gates only `ferrous-api`, `ferrous-agent` and `ferrous-frontend`; the data platform does not depend on it.
+2. **Explicit Healthcheck Dependency Graph:** Startup is gated with `condition: service_healthy`. `iggy-broker`, `sierradb`, and `ferrous-vectordb` boot first, then storage consumers, `order-projection` (`ferrous-cqrses`), the API gateway (`ferrous-api`, gated by `sierradb` and `iggy-broker`), `order-saga` (`ferrous-cqrses`, gated by `iggy-broker`, `sierradb`, and `ferrous-api`), reverse proxy and frontend. `ferrous-iam` gates only `ferrous-api`, `ferrous-agent` and `ferrous-frontend`; the data platform does not depend on it.
 3. **Day-0 Kernel Hardening:** All application containers enforce:
    - `read_only: true` (immutable root filesystem).
    - `cap_drop: ALL` (zero elevated Linux capabilities).
@@ -271,6 +299,7 @@ ferrous-cx/ (This Repository - Core Public Repository: demo config, runtime stac
 | `ferrous-cx` | `ferrous-sierradb` | `9090` (RESP3) | TCP port 9090 probe | Yes |
 | `ferrous-vectordb` | `ferrous-vectordb` | `6333` (HTTP), `6334` (gRPC) | `GET /readyz` HTTP 200 | Yes |
 | `ferrous-cqrses` | `order-projection` | Internal | `/order_projection --healthcheck` | Yes |
+| `ferrous-cqrses` | `order-saga` | Internal | `/order_saga --healthcheck` | Yes |
 | `ferrous-api` | `ferrous-api` | `8080` (HTTP) | `GET /health` HTTP 200 | Yes |
 | `ferrous-agent` | `ferrous-agent` | `8081` (HTTP) | `GET /health` HTTP 200 | Yes |
 | `ferrous-frontend` | `ferrous-frontend` | `5173` (HTTP) | `GET /health` HTTP 200 | Yes |
@@ -433,6 +462,8 @@ docker compose ps        # wait until ferrous-iam, iggy-broker, sierradb, and ve
 | SierraDB Event Store | `localhost:9090` | Pure-Rust RESP3 Event Store (`EAPPEND`, `ESCAN`, `ESVER`) |
 | Qdrant Vector DB | `http://localhost:6333/readyz` | Vector DB for SOPs & Transcripts |
 | Ferrous API Gateway | `http://localhost:8080/health` | Axum API + SSE + In-Process DataFusion |
+| Settlement Webhook Gateway | `http://localhost:8080/api/v1/webhooks/orders/settlement-callback` | M2M Async Settlement Ingress (Kanidm JWT) |
+| Order Saga Daemon | Internal (`cg-order-saga`) | Outbound Enterprise ERP Saga Orchestrator |
 | Frontend UI | `http://localhost:5173/` | Svelte 5 Operator Studio (read-only) |
 
 ### 5. Provision Topics, Consumer Groups, Delta Lake Storage, & IAM Personas
