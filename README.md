@@ -47,17 +47,16 @@ flowchart TD
 
     subgraph API_Tier ["API Service (ferrous-api & ferrous-cqrses)"]
         Command["Domain Command<br/>• IssueCourtesyCreditCommand<br/>• SettleCourtesyCreditCommand"]
-        CommandHandler["OrderCommandHandler<br/>• 3. ESCAN from SierraDB<br/>• 4. Rehydrate Aggregate<br/>• 5. Invariant Evaluation<br/>• 6. EAPPEND to SierraDB<br/>• 7. Publish to Iggy Topic"]
+        CommandHandler["OrderCommandHandler<br/>• 3. ESCAN from SierraDB<br/>• 4. Rehydrate Aggregate<br/>• 5. Invariant Evaluation<br/>• 6. EAPPEND to SierraDB<br/>• 7. ESCAN from SierraDB<br/>• 8. Rehydrate Aggregate<br/>• 9. Publish to Iggy Topic"]
         Aggregate["OrderAggregate (Domain Model)<br/>• State: Status, Cumulative Credit<br/>• Invariant: Max $20 credit ceiling<br/>• Produces: CourtesyCreditIssued / Settled"]
         CallbackWorker["Callback Command Worker<br/>• Consumer Group: cg-order-callback<br/>• Generates SettleCourtesyCreditCommand"]
         SierraDB[("SierraDB Event Store (Port 9090)<br/>• Pure-Rust RESP3 Protocol<br/>• ESCAN (Rehydrate) & EAPPEND (Atomic Append)")]
 
         Command -->|"2. Dispatch to Handler"| CommandHandler
-        SierraDB -->|"3. Rehydrate Aggregate"| Aggregate        
-        Aggregate -->|"4. State to Handler"| CommandHandler
-        CommandHandler -->|"5. Invariant Evaluation"| Aggregate
+        SierraDB -->|"3 & 7. ESCAN from SierraDB"| Aggregate
+        Aggregate -->|"4 & 8. Rehydrate Aggregate"| CommandHandler
         CommandHandler -->|"6. EAPPEND Save to Stream"| SierraDB
-        CommandHandler -->|"7. Publish to Iggy Topic"| IggyEvents
+        CommandHandler -->|"9. Publish to Iggy Topic"| IggyEvents
     end
 
     subgraph Streaming_Fabric ["Message Broker & Event Bus (Apache Iggy)"]
@@ -71,22 +70,27 @@ flowchart TD
 
     subgraph Enterprise_Tier ["Internal Enterprise Network (Private / Non-Public)"]
         EnterpriseWorkflow["Enterprise Workflow / ERP System<br/>(Internal SAP / Core Banking)"]
-    end
+    end        
+
+    Client_Tier ~~~ API_Tier
+    API_Tier ~~~ Streaming_Fabric
+    Streaming_Fabric ~~~ Projection_Tier
+    Projection_Tier ~~~ Enterprise_Tier    
 
     %% Step 1: User Command Ingestion
     Client -->|"1. Submit Request"| Command
     CommandHandler -.->|"Live SSE Update"| Client
 
     %% Step 2: Domain Projection Consumption
-    IggyEvents -->|"8. Consume CreditIssuedEvent"| DomainProjection
-    DomainProjection <-->|"9. Private Network Execution"| EnterpriseWorkflow
+    IggyEvents -->|"10. Consume CreditIssuedEvent"| DomainProjection
+    DomainProjection -->|"11. Private Network Execution"| EnterpriseWorkflow
 
     %% Step 3: Callback Queue Placement
-    DomainProjection -->|"10. Place Response Payload"| IggyCallbacks
+    DomainProjection -->|"12. Place Response Payload"| IggyCallbacks
 
     %% Step 4: Callback to Command Loop
-    IggyCallbacks -->|"11. Consume Callback Message"| CallbackWorker
-    CallbackWorker -->|"12. Construct Settle Command"| Command
+    IggyCallbacks -->|"13. Consume Callback Message"| CallbackWorker
+    CallbackWorker -->|"14. Construct Settle Command"| Command
 ```
 
 #### How Command, Command Handler, Aggregate, and Projection Work Together:
