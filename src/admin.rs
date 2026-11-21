@@ -25,13 +25,19 @@ pub const STREAMING_TOPICS: &[TopicSpec] = &[
         id: 1,
         name: "intake",
         partitions: 4,
-        description: "Raw ingestion WAL for mutation commands and simulation events (immediate fsync)",
+        description: "Direct raw data injection from stream-replay-rs into Delta Lake (immediate fsync)",
     },
     TopicSpec {
         id: 2,
         name: "consolidated",
         partitions: 4,
-        description: "CQRS-ES domain state projections and validated entity events (immediate fsync)",
+        description: "Committed CQRS-ES domain state projections and snapshots for Delta Lake & Saga (immediate fsync)",
+    },
+    TopicSpec {
+        id: 3,
+        name: "callback",
+        partitions: 4,
+        description: "Asynchronous inbound callback queue consumed by CallbackService (immediate fsync)",
     },
 ];
 
@@ -84,6 +90,22 @@ pub const CONSUMER_GROUPS: &[ConsumerGroupSpec] = &[
         group_id: 1,
         name: "cg-arroyo-state",
         description: "Consolidated state consumer group",
+    },
+    ConsumerGroupSpec {
+        stream_id: 1,
+        topic_id: 2,
+        topic_name: "consolidated",
+        group_id: 2,
+        name: "cg-order-projection",
+        description: "Projection engine consumer group for Delta Lake snapshots and callback dispatch",
+    },
+    ConsumerGroupSpec {
+        stream_id: 1,
+        topic_id: 3,
+        topic_name: "callback",
+        group_id: 1,
+        name: "cg-order-callback",
+        description: "CallbackService consumer group for rehydration, invariant evaluation, and SierraDB EAPPEND",
     },
     ConsumerGroupSpec {
         stream_id: 2,
@@ -509,7 +531,7 @@ pub async fn run_verify_broker(
     if dry_run {
         println!("\n  [INFO] Running in --dry-run mode (skipping network probes).");
         println!("  [AUDIT] Validated Apache Iggy health probe (port 3000/ping)");
-        println!("  [AUDIT] Validated required consumer group attachments: cg-arroyo-raw, cg-arroyo-state, cg-cmd-handler, cg-arroyo-benchmark, cg-arroyo-olist");
+        println!("  [AUDIT] Validated required consumer group attachments: cg-arroyo-raw, cg-arroyo-state, cg-order-projection, cg-cmd-handler, cg-order-callback, cg-arroyo-benchmark, cg-arroyo-olist");
         println!("\n  [OK] Apache Iggy broker health and consumer groups verified in dry-run mode.");
         return Ok(());
     }
@@ -530,6 +552,8 @@ pub async fn run_verify_broker(
         (DEFAULT_STREAM_NAME, "intake", "cg-arroyo-raw"),
         (DEFAULT_STREAM_NAME, "intake", "cg-cmd-handler"),
         (DEFAULT_STREAM_NAME, "consolidated", "cg-arroyo-state"),
+        (DEFAULT_STREAM_NAME, "consolidated", "cg-order-projection"),
+        (DEFAULT_STREAM_NAME, "callback", "cg-order-callback"),
         (BENCHMARK_STREAM_NAME, "hpc_mqbench", "cg-arroyo-benchmark"),
         (OLIST_STREAM_NAME, "orders_stream", "cg-arroyo-olist"),
     ];
