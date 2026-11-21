@@ -156,8 +156,9 @@ services:
       - IGGY_USERNAME=${IGGY_USERNAME:-iggy}
       - IGGY_PASSWORD=${IGGY_PASSWORD:-iggy}
       - STREAM_NAME=orders
-      - TOPIC_ORDERS_EVENTS=events
+      - TOPIC_ORDERS_EVENTS=consolidated
       - TOPIC_ORDERS_CONSOLIDATED=consolidated
+      - TOPIC_ORDERS_CALLBACK=callback
       - CONSUMER_GROUP=cg-order-projection
       - SIERRADB_URL=${SIERRADB_URL:-redis://sierradb:9090}
     deploy:
@@ -202,7 +203,7 @@ services:
       - IGGY_USERNAME=${IGGY_USERNAME:-iggy}
       - IGGY_PASSWORD=${IGGY_PASSWORD:-iggy}
       - STREAM_NAME=orders
-      - TOPIC_ORDERS_EVENTS=events
+      - TOPIC_ORDERS_EVENTS=consolidated
       - CONSUMER_GROUP=cg-order-saga
       - ENTERPRISE_SETTLEMENT_URL=${ENTERPRISE_SETTLEMENT_URL:-http://mock-enterprise:9090/settlement}
       - ENTERPRISE_AUTH_TOKEN=${KANIDM_SERVICE_TOKEN:-}

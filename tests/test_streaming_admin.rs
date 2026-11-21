@@ -15,6 +15,7 @@ fn test_streaming_admin_provision_topics_dry_run() {
     assert!(stdout.contains("Validated stream 'orders' (id: 1) specification."));
     assert!(stdout.contains("Validated topic 'intake' (id: 1, partitions: 4, fsync: immediate)"));
     assert!(stdout.contains("Validated topic 'consolidated' (id: 2, partitions: 4, fsync: immediate)"));
+    assert!(stdout.contains("Validated topic 'callback' (id: 3, partitions: 4, fsync: immediate)"));
     assert!(stdout.contains("Validated stream 'olist' (id: 3) specification."));
     assert!(stdout.contains("Validated topic 'orders_stream' (id: 1, partitions: 4, fsync: immediate)"));
 }
@@ -32,6 +33,8 @@ fn test_streaming_admin_provision_consumer_groups_dry_run() {
     assert!(stdout.contains("Validated consumer group 'cg-arroyo-raw' (id: 1)"));
     assert!(stdout.contains("Validated consumer group 'cg-cmd-handler' (id: 2)"));
     assert!(stdout.contains("Validated consumer group 'cg-arroyo-state' (id: 1)"));
+    assert!(stdout.contains("Validated consumer group 'cg-order-projection' (id: 2)"));
+    assert!(stdout.contains("Validated consumer group 'cg-order-callback' (id: 1)"));
     assert!(stdout.contains("Validated consumer group 'cg-arroyo-olist' (id: 1)"));
 }
 

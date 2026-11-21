@@ -15,11 +15,11 @@ topics:
     topic: intake
     kafka_name: orders.intake
     partitions: 4
-    retention: none          # no expiry: EARLIEST offset is always 0 through the bridge (Contract Sheet, section 2)
+    retention: none          # direct raw data injection from stream-replay-rs into Delta Lake (orders_raw_events)
     durability: replicated
     kafka:
       consume: [cg-arroyo-raw]
-      produce: false
+      produce: true
 
   - stream: orders
     topic: consolidated
@@ -28,7 +28,17 @@ topics:
     retention: none
     durability: replicated
     kafka:
-      consume: [cg-arroyo-state]
+      consume: [cg-arroyo-state, cg-order-projection, cg-order-saga]
+      produce: false
+
+  - stream: orders
+    topic: callback
+    kafka_name: orders.callback
+    partitions: 4
+    retention: none
+    durability: replicated
+    kafka:
+      consume: [cg-order-callback]
       produce: false
 
   - stream: olist
