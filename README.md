@@ -107,54 +107,56 @@ flowchart TD
 
 ---
 
-### 2. Query, Analytical & Agentic Path (Read Flow)
+### 2. CQRS / ES Query Model (Read Flow)
 
-The Read Path focuses exclusively on low-latency analytical querying and conversational AI retrieval against Delta Lake and the vector knowledge base:
+Following strict **CQRS / ES**, the **Query Model** is dedicated purely to read-only **Queries** and **Materialized Views** powered by **Apache DataFusion** as the query engine, completely decoupled from write-side aggregates, event stores, and downstream analytics/AI workloads:
+
+> **Roadmap Note:** Analytics (OLAP/BI) and the Agentic Path (`ferrous-agent`, `rig-core`, `Qdrant Vector DB`) are deferred to a **future version** to keep the core CQRS/ES Read Flow strictly focused on Query & View execution.
 
 ```mermaid
 flowchart TD
-    subgraph Frontend_Read ["Client Presentation Tier"]
-        ClientUI["Frontend Client (Svelte 5)<br/>• 3-Column Operational Canvas<br/>• Orders Workbench & AI Copilot Canvas"]
+    subgraph Client_Read ["Client Tier"]
+        ClientUI["Client Application<br/>• Dispatches Read Queries (HTTP / REST)<br/>• Renders Projected Views"]
     end
 
-    subgraph API_and_Agent_Tier ["API Service & Agent Core (ferrous-api / ferrous-agent)"]
-        ApiQuery["Axum REST / GraphQL Endpoints<br/>• Order Detail, Status & Timeline Lookups<br/>• SLA Radar & Analytics Aggregations"]
-        AgentCore["Ferrous Agent Core (ferrous-agent)<br/>• rig-core LLM Orchestration<br/>• Transparent Agentic Sidecar"]
+    subgraph Query_Tier ["Query Model (ferrous-api)"]
+        Query["Query (Read Contract)<br/>• GetOrderQuery (by order_id)<br/>• ListOrdersQuery (filter / pagination)"]
+        QueryHandler["Query Handler<br/>• Routes Query to DataFusion<br/>• Maps Arrow RecordBatches to View DTOs<br/><i>Ref: QueriesHandler (src/handlers/queries.rs)</i>"]
+        View["View (Read DTO)<br/>• OrderView / OrderListView<br/>• Read-Only Projected Response"]
     end
 
-    subgraph Query_Engine_Tier ["Embedded Analytical Engine (In-Process)"]
-        DataFusion["Embedded Apache DataFusion<br/>(in-process SessionContext in ferrous-api / ferrous-agent)<br/>• Vectorized SQL Execution (<3ms P95)<br/>• Extensible TableProvider Catalog"]
+    subgraph Query_Engine_Tier ["Query Engine (In-Process)"]
+        DataFusion["Apache DataFusion<br/>• Embedded SessionContext<br/>• Vectorized SQL Execution (<3ms P95)<br/>• Delta TableProvider Catalog"]
     end
 
-    subgraph Storage_Tier ["Lakehouse & Knowledge Storage"]
-        DeltaLake[("Delta Lake Storage (/data/delta)<br/>• orders_current_state (Materialized Views)<br/>• orders_raw_events (Immutable Audit Log)<br/>• olist_orders (Historical Replay Dataset)<br/>• hpc_benchmarks (Execution Metrics)")]
-        VectorDB[("Qdrant Vector DB (Port 6333)<br/>• SOPs, Policy Docs & Chat Transcripts<br/>• Fast HNSW Vector Similarity Search")]
+    subgraph Read_Store_Tier ["Materialized View Store"]
+        DeltaLake[("Delta Lake (/data/delta)<br/>• orders_current_state (Current View)<br/>• orders_raw_events (Event View)")]
     end
 
-    Frontend_Read ~~~ API_and_Agent_Tier
-    API_and_Agent_Tier ~~~ Query_Engine_Tier
-    Query_Engine_Tier ~~~ Storage_Tier
+    Client_Read ~~~ Query_Tier
+    Query_Tier ~~~ Query_Engine_Tier
+    Query_Engine_Tier ~~~ Read_Store_Tier
 
-    %% Client Ingress
-    ClientUI -->|"1. Operational Query (HTTP / REST)"| ApiQuery
-    ClientUI -->|"2. Agentic Prompts & Copilot Requests"| AgentCore
-
-    %% In-Process DataFusion Execution
-    ApiQuery -->|"3. In-Process SQL Execution (<3ms)"| DataFusion
-    AgentCore -->|"4. Execute Analytical Tool (SQL)"| DataFusion
-    AgentCore -.->|"5. Vector Similarity Search"| VectorDB
-
-    %% Vectorized Lakehouse Parquet Scan
-    DataFusion -->|"6. Vectorized Parquet Scan (delta-rs log)"| DeltaLake
-
-    %% Stream & Result Delivery
-    ApiQuery -->|"7. Return Order State & Analytics"| ClientUI
-    AgentCore -->|"8. Stream LLM Reasoning & Workbench Data"| ClientUI
+    %% Query & View Flow
+    ClientUI -->|"1. Submit Query"| Query
+    Query -->|"2. Dispatch to Handler"| QueryHandler
+    QueryHandler -->|"3. Execute SQL Query"| DataFusion
+    DataFusion -->|"4. Scan Materialized View (delta-rs)"| DeltaLake
+    DeltaLake -->|"5. Arrow RecordBatches"| DataFusion
+    DataFusion -->|"6. Query Result"| QueryHandler
+    QueryHandler -->|"7. Assemble View DTO"| View
+    View -->|"8. Return View"| ClientUI
 ```
 
-* **Sub-3ms Analytical Querying:** `ferrous-api` and `ferrous-agent` host in-process **Apache DataFusion** instances. Queries against `orders_current_state` and `orders_raw_events` execute in sub-3ms P95 latency via vectorized scans over Parquet files, without intermediate database proxies or serialization overhead.
-* **Agentic Context Enrichment:** When customer service agents interact with the AI sidecar, `ferrous-agent` combines DataFusion SQL query results from Delta Lake with semantic SOP retrievals from **Qdrant Vector DB**, presenting live synthesized context on the Svelte 5 workbench.
-* **Separation of Concerns:** The Read Model contains zero write-side stream processing, ingestion pipelines, or replayer plumbing, ensuring a clean decoupling between the command execution path and query engine retrieval.
+#### How Query, Query Handler, Apache DataFusion, and Materialized View Work Together:
+
+| Component | Concrete Implementation | Role in CQRS / ES Query Model |
+| :--- | :--- | :--- |
+| **Query** | `GetOrderQuery`<br/>`ListOrdersQuery` | **Read Contract:** Side-effect-free request describing what state to retrieve without mutating any domain aggregate. |
+| **Query Handler** | `QueriesHandler`<br/>(`ferrous-api/src/handlers/queries.rs`) | **Read Coordinator:** Translates incoming REST queries into parameterized SQL, invokes the embedded DataFusion query engine, and maps Arrow batches into typed View DTOs. |
+| **Query Engine** | **Apache DataFusion**<br/>(`ferrous-api/src/query_engine.rs`) | **In-Process SQL Engine:** Executes vectorized SQL queries (<3ms P95) directly against registered Delta Lake `TableProvider` views with zero external DB proxy overhead. |
+| **Materialized View** | **Delta Lake** (`orders_current_state`, `orders_raw_events`) | **Read-Optimized Store:** Pre-folded snapshots written by `Projection` via `delta-rs`, optimized for fast point lookups and filtered listings without replaying SierraDB event streams. |
+| **View (DTO)** | `OrderDetailResponse`<br/>`OrderListResponse` | **Projected Output:** Immutable, client-facing representation shaped specifically for UI/API consumption. |
 
 ---
 
