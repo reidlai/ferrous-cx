@@ -11,7 +11,9 @@ source-of-draft: _bmad-output/implementation-artifacts/spike-3-13/bridge-contrac
 
 > **Not yet run against a live stack.** Every row comes from reading source code and documentation on 2026-11-04. The Docker daemon was not available, so nothing here has been observed on a running system. Rows marked **Desk** are sourced and unverified; rows marked **L#** name the live check in the table at the end that must pass before the sheet is final. Evidence and URLs: [evidence-upstream-gateway.md](../../_bmad-output/implementation-artifacts/spike-3-13/evidence-upstream-gateway.md), [evidence-arroyo-kafka-source.md](../../_bmad-output/implementation-artifacts/spike-3-13/evidence-arroyo-kafka-source.md), [evidence-replayer-sink.md](../../_bmad-output/implementation-artifacts/spike-3-13/evidence-replayer-sink.md).
 
-**Implementation assumed:** Apache Iggy's upstream `iggy-gateway-kafka` image, pinned by digest and configured, not built here (decision note: [decision.md](../../_bmad-output/implementation-artifacts/spike-3-13/decision.md)). If a live check forces the build-here option, the rows still hold. They describe the contract, and the implementation must meet them.
+**Implementation:** built here, in its own repository (`iggy-kafka-bridge`), as a Rust crate on `kafka-protocol` 0.18 and the `iggy` SDK 0.11 (decision of 2026-11-04, superseding the earlier recommendation to adopt Apache Iggy's upstream `iggy-gateway-kafka`; see [decision.md](decision.md)). Rows that say "Desk" and cite the upstream gateway record what that gateway does. For the built bridge they are **design choices to settle in Story 3.13**: each one is either copied from the upstream behaviour or replaced with a better one, and the choice is written into this sheet. The sheet describes the contract, and the bridge must meet it.
+
+**Design choices to settle in Story 3.13:** the earliest offset (always 0, as upstream, or the real log start); frame and header limits (upstream: 8 MiB, three headers per slot); where Kafka offset commits are stored (Iggy consumer offsets under the Kafka group name); the duplicate policy for retried produces; timestamp clamping; and how the two listeners are configured.
 
 ## 1. Topic coordinates
 
@@ -195,7 +197,7 @@ Open: the exact Iggy permission set. The gateway also keeps a cluster id in stre
 
 ## 9. Listeners, advertised addresses and readiness
 
-The gateway supports one listener per protocol, and a client is sent back only to the advertised address of the listener it connected through. Compose-network clients and a host client therefore need different advertised addresses, and two PLAINTEXT listeners are not possible. The contract uses **two gateway instances** of the same pinned image against the same Iggy server:
+The gateway supports one listener per protocol, and a client is sent back only to the advertised address of the listener it connected through. Compose-network clients and a host client therefore need different advertised addresses, and two PLAINTEXT listeners are not possible. The upstream gateway supports one listener per protocol, so adopting it would have needed **two instances** of one image. The built bridge serves both listeners from **one process**; the two rows below are its two listeners (the upstream-image workaround is kept here only as the reason for the design):
 
 | Instance | Reached by | Bind (in container) | Advertised | Published |
 |---|---|---|---|---|
