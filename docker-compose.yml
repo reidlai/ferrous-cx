@@ -150,7 +150,7 @@ services:
     security_opt:
       - no-new-privileges:true
     tmpfs:
-      - /tmp:noexec,nosuid,nodev,size=64M
+      - /tmp:noexec,nosuid,nodev,size=64M,mode=1777
     environment:
       - IGGY_SERVER_ADDRESS=${IGGY_SERVER_ADDRESS:-iggy-broker:8090}
       - IGGY_USERNAME=${IGGY_USERNAME:-iggy}
@@ -193,7 +193,7 @@ services:
     security_opt:
       - no-new-privileges:true
     tmpfs:
-      - /tmp:noexec,nosuid,nodev,size=64M
+      - /tmp:noexec,nosuid,nodev,size=64M,mode=1777
     deploy:
       resources:
         limits:
@@ -240,7 +240,7 @@ services:
     security_opt:
       - no-new-privileges:true
     tmpfs:
-      - /tmp:noexec,nosuid,nodev,size=64M
+      - /tmp:noexec,nosuid,nodev,size=64M,mode=1777
     ports:
       - "${PORT_API:-8080}:8080"
     volumes:
@@ -287,7 +287,7 @@ services:
     security_opt:
       - no-new-privileges:true
     tmpfs:
-      - /tmp:noexec,nosuid,nodev,size=64M
+      - /tmp:noexec,nosuid,nodev,size=64M,mode=1777
       - /delta:noexec,nosuid,nodev,size=128M
     ports:
       - "${PORT_AGENT:-8081}:8081"
@@ -343,7 +343,7 @@ services:
     security_opt:
       - no-new-privileges:true
     tmpfs:
-      - /tmp:noexec,nosuid,nodev,size=64M
+      - /tmp:noexec,nosuid,nodev,size=64M,mode=1777
     ports:
       - "${PORT_FRONTEND:-5173}:5173"
     environment:
@@ -381,7 +381,7 @@ services:
     security_opt:
       - no-new-privileges:true
     tmpfs:
-      - /tmp:noexec,nosuid,nodev,size=64M
+      - /tmp:noexec,nosuid,nodev,size=64M,mode=1777
     ports:
       - "${PORT_HTTP:-80}:80"
       - "${PORT_HTTPS:-443}:443"
@@ -419,7 +419,7 @@ services:
     security_opt:
       - no-new-privileges:true
     tmpfs:
-      - /tmp:noexec,nosuid,nodev,size=64M
+      - /tmp:noexec,nosuid,nodev,size=64M,mode=1777
     ports:
       - "${PORT_OTLP_GRPC:-4317}:4317"     # OTLP gRPC receiver
       - "${PORT_OTLP_HTTP:-4318}:4318"     # OTLP HTTP receiver
