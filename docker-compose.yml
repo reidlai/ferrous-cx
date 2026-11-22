@@ -150,6 +150,29 @@ services:
     cap_drop:
       - ALL
 
+  # 2b. Automated Qdrant Knowledge Base & Transcript Seeder (One-Shot Init)
+  vectordb-seeder:
+    build:
+      context: ../ferrous-vectordb
+      dockerfile: Dockerfile.seeder
+    image: ferrous-vectordb-seeder:latest
+    container_name: ferrous-vectordb-seeder
+    user: "10001:10001"
+    restart: "no"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ../ferrous-vectordb/data:/app/data:ro
+    environment:
+      - QDRANT_HOST=http://vectordb:6333
+      - QDRANT_API_KEY=${QDRANT_API_KEY:-}
+    depends_on:
+      vectordb:
+        condition: service_healthy
+
   # 2.5 Pure-Rust Distributed Event Store (SierraDB)
   sierradb:
     image: tqwewe/sierradb:latest
@@ -356,6 +379,8 @@ services:
         condition: service_healthy
       vectordb:
         condition: service_healthy
+      vectordb-seeder:
+        condition: service_completed_successfully
       ferrous-iam:
         condition: service_healthy
     healthcheck:
