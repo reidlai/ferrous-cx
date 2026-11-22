@@ -312,6 +312,9 @@ services:
       - SIERRADB_URL=${SIERRADB_URL:-redis://sierradb:9090}
       - KANIDM_JWT_SECRET=${KANIDM_JWT_SECRET:-development_kanidm_jwt_secret_32_bytes_minimum!}
       - KANIDM_ISSUER=${KANIDM_ISSUER:-https://iam.ferrouscx.local/oauth2/openid/svc_ferrous_api}
+      - CARLOS_SUPPORT_PASSWORD=${CARLOS_SUPPORT_PASSWORD:-ferrous-demo-2026}
+      - OPS_LEAD_PASSWORD=${OPS_LEAD_PASSWORD:-ferrous-demo-2026}
+      - ADMIN_SEC_PASSWORD=${ADMIN_SEC_PASSWORD:-ferrous-demo-2026}
       - DELTA_DATA_DIR=/data/delta
       - DELTA_ORDERS_PATH=/data/delta/orders_current_state
       - RUST_LOG=info
