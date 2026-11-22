@@ -51,7 +51,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M
+          memory: 2G
 
   # 0b. Native Apache Iggy -> Delta Lake 2PC Sink Connector Daemon (AD-24, AD-28b)
   delta-sink:
