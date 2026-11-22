@@ -16,7 +16,7 @@ $$N_{\text{sent}} = N_{\text{iggy}} = N_{\text{delta}}$$
 | **Stage 1: Replayer Sink** | `--sink` | — | `iggy` | `stream-replay-rs` sink type (`iggy`, `kafka`, `nats`, `fluvio`, `iceoryx2`, `stdout`) |
 | **Stage 2: Apache Iggy Broker** | `--iggy-url` | `IGGY_HTTP_URL` | `http://127.0.0.1:3000` | Apache Iggy HTTP API for `/ping` liveness and topic/offset verification |
 | **Stage 3: Delta Lake / Query** | `--query-url` | `QUERY_SERVICE_URL` | `http://127.0.0.1:8080` | Ferrous API DataFusion Query Service HTTP API over `/data/delta/hpc_benchmarks` |
-| **Target Topic** | `--topic` | `BENCHMARK_TOPIC` | `benchmark.hpc_mqbench` | Target topic mapped to Iggy stream `benchmark`, topic `hpc_mqbench` (4 partitions) |
+| **Target Topic** | `--topic` | `BENCHMARK_TOPIC` | `benchmark/hpc_mqbench` | Target Iggy destination (`<stream>/<topic>`, 4 partitions) |
 
 ---
 
@@ -71,11 +71,14 @@ The `data` field is dynamically padded with `'X'` characters so that the entire 
 
 ## 🔁 Step 2: Replay Dataset with `stream-replay-rs` (`replay-profile.toml`)
 
-`benchmark/replay-profile.toml` is a turnkey `stream-replay-rs` configuration file that maps `client_timestamp_us` (`us`) and `record_id` to `benchmark.hpc_mqbench`:
+`benchmark/replay-profile.toml` is a turnkey `stream-replay-rs` configuration file that maps `client_timestamp_us` (`us`) and `record_id` to `benchmark/hpc_mqbench`:
 
 ```bash
-# Live replay into the ferrous-cx stack directly via Apache Iggy (127.0.0.1:8090)
+# Live replay into the ferrous-cx stack directly via Apache Iggy HTTP API (http://127.0.0.1:3000)
 stream-replay-rs --config benchmark/replay-profile.toml
+
+# Maximum unthrottled throughput (135k–155k+ msg/s across 4 batched partition workers)
+stream-replay-rs --config benchmark/replay-profile.toml --speed max --no-loop
 ```
 
 ---
@@ -83,9 +86,12 @@ stream-replay-rs --config benchmark/replay-profile.toml
 ## 📊 Step 3: Run End-to-End Qualification Benchmark (`run-hpc-benchmark`)
 
 ```bash
-# Run benchmark in offline/conformance mode
-cargo run --bin run-hpc-benchmark -- --offline --config benchmark/workload.toml
+# Run deterministic offline qualification verification (simulated)
+cargo run --release --bin run-hpc-benchmark -- --offline --count 1000 --rate 25
 
-# Run live benchmark against running Apache Iggy stack
-cargo run --bin run-hpc-benchmark -- --config benchmark/workload.toml
+# Run live broker-verified benchmark against running Apache Iggy stack (--rate 0 = unthrottled max speed)
+cargo run --release --bin run-hpc-benchmark -- \
+  --sink iggy --sink-url http://127.0.0.1:3000 \
+  --topic benchmark/hpc_mqbench \
+  --count 100000 --rate 0 --payload-size 256 --partitions 4
 ```

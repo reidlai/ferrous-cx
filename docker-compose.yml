@@ -53,6 +53,44 @@ services:
         limits:
           memory: 256M
 
+  # 0b. Native Apache Iggy -> Delta Lake 2PC Sink Connector Daemon (AD-24, AD-28b)
+  delta-sink:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.delta_sink
+    image: ferrous-delta-sink:latest
+    container_name: ferrous-delta-sink
+    user: "10001:10001"
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev,size=64M,mode=1777
+    ports:
+      - "${PORT_DELTA_SINK:-8095}:8095"
+    volumes:
+      - delta_data:/data/delta
+      - ./config/streaming/connectors:/etc/iggy/connectors:ro
+    environment:
+      - IGGY_HTTP_URL=http://iggy-broker:3000
+      - IGGY_USERNAME=${IGGY_USERNAME:-iggy}
+      - IGGY_PASSWORD=${IGGY_PASSWORD:-iggy}
+      - DELTA_DATA_DIR=/data/delta
+      - DELTA_SINK_CONFIG=/etc/iggy/connectors/delta_sink.toml
+      - DELTA_SINK_PORT=8095
+    depends_on:
+      iggy-broker:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/delta-sink", "--healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
   # 1. Identity & Access Management (Kanidm Pure-Rust IdP)
   ferrous-iam:
     build:
