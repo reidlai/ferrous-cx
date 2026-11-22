@@ -29,7 +29,7 @@
 
 ## 🏛️ System Architecture Topology
 
-FerrousCX follows strict **Domain-Driven Design (DDD)** and **Command Query Responsibility Segregation (CQRS)** with **Event Sourcing (ES)**. 
+FerrousCX follows strict **Domain-Driven Design (DDD)** and **Command Query Responsibility Segregation (CQRS)** with **Event Sourcing (ES)**.
 
 To clearly understand the operational boundaries and how domain components collaborate, the architecture separates the **Write Model (Commands, Handlers, Aggregates, Event Store & Domain Projections)** from the **Read Model (Projections, Lakehouse & Query Engines)**.
 
@@ -95,15 +95,15 @@ flowchart TD
 
 #### How Command, Command Handler, Aggregate, Callback Service, and Projection Work Together:
 
-| Component | Concrete Implementation | Role in Lifecycle & Invariants |
-| :--- | :--- | :--- |
-| **Command** | `IssueCourtesyCreditCommand`<br/>`CancelOrderCommand` | **Intent:** Immutable data contract encapsulating a user request to modify state. Does not mutate state directly. |
-| **CommandHandler** | `CommandHandler`<br/>(`ferrous-cqrses/src/domain/order/handler.rs`) | **Orchestrator:** Interacts with `SierraDB` to rehydrate the `Aggregate` (`ESCAN`), delegates command execution to the aggregate, enforces aggregate versioning, atomically persists resulting events via `EAPPEND`, and broadcasts committed state to `orders/consolidated`. |
-| **Callback Service** | `Callback Service`<br/>(`ferrous-cqrses/src/domain/order/callback.rs`) | **Callback Stream Consumer:** Consumes inbound callback messages from Apache Iggy (`orders/callback`, `cg-order-callback`), executes the same `CommandHandler` pipeline (`ESCAN` rehydrate → invariant evaluation → `EAPPEND` to SierraDB), and notifies live SSE listeners. |
-| **Aggregate** | `Aggregate`<br/>(`ferrous-cqrses/src/domain/order/aggregate.rs`) | **Guardian of Invariants:** Domain entity maintaining internal state purely from past events. Evaluates business rules: e.g. **maximum $20 cumulative courtesy credit**, order lifecycle state compatibility (`Delivered`/`InTransit`), and emits uncommitted **Domain Events** (`CourtesyCreditIssued`, `OrderCancelled`, `CourtesyCreditSettled`). |
-| **Event Store** | `SierraDB` (Port 9090)<br/>(`sierra.rs`) | **Single Source of Truth:** Pure-Rust RESP3 append-only log. Ensures linear, atomic event ordering without table locks. |
-| **Iggy Topics** | `orders/callback`, `orders/consolidated` | **`orders/callback`:** Inbound callback queue consumed by `Callback Service`. **`orders/consolidated`:** Committed snapshots/events for Delta Lake (`orders_current_state`) and `order-saga`. |
-| **Projection** | `order-projection`<br/>(`ferrous-cqrses/src/bin/order_projection.rs`) | **Read Model Materializer:** Consumes `orders/consolidated` under consumer group `cg-order-projection`, purely folds events into state snapshots, and persists `orders_current_state` directly to **Delta Lake via `delta-rs`**. |
+| Component            | Concrete Implementation                                                | Role in Lifecycle & Invariants                                                                                                                                                                                                                                                                                                                       |
+| :------------------- | :--------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Command**          | `IssueCourtesyCreditCommand`<br/>`CancelOrderCommand`                  | **Intent:** Immutable data contract encapsulating a user request to modify state. Does not mutate state directly.                                                                                                                                                                                                                                    |
+| **CommandHandler**   | `CommandHandler`<br/>(`ferrous-cqrses/src/domain/order/handler.rs`)    | **Orchestrator:** Interacts with `SierraDB` to rehydrate the `Aggregate` (`ESCAN`), delegates command execution to the aggregate, enforces aggregate versioning, atomically persists resulting events via `EAPPEND`, and broadcasts committed state to `orders/consolidated`.                                                                        |
+| **Callback Service** | `Callback Service`<br/>(`ferrous-cqrses/src/domain/order/callback.rs`) | **Callback Stream Consumer:** Consumes inbound callback messages from Apache Iggy (`orders/callback`, `cg-order-callback`), executes the same `CommandHandler` pipeline (`ESCAN` rehydrate → invariant evaluation → `EAPPEND` to SierraDB), and notifies live SSE listeners.                                                                         |
+| **Aggregate**        | `Aggregate`<br/>(`ferrous-cqrses/src/domain/order/aggregate.rs`)       | **Guardian of Invariants:** Domain entity maintaining internal state purely from past events. Evaluates business rules: e.g. **maximum $20 cumulative courtesy credit**, order lifecycle state compatibility (`Delivered`/`InTransit`), and emits uncommitted **Domain Events** (`CourtesyCreditIssued`, `OrderCancelled`, `CourtesyCreditSettled`). |
+| **Event Store**      | `SierraDB` (Port 9090)<br/>(`sierra.rs`)                               | **Single Source of Truth:** Pure-Rust RESP3 append-only log. Ensures linear, atomic event ordering without table locks.                                                                                                                                                                                                                              |
+| **Iggy Topics**      | `orders/callback`, `orders/consolidated`                               | **`orders/callback`:** Inbound callback queue consumed by `Callback Service`. **`orders/consolidated`:** Committed snapshots/events for Delta Lake (`orders_current_state`) and `order-saga`.                                                                                                                                                        |
+| **Projection**       | `order-projection`<br/>(`ferrous-cqrses/src/bin/order_projection.rs`)  | **Read Model Materializer:** Consumes `orders/consolidated` under consumer group `cg-order-projection`, purely folds events into state snapshots, and persists `orders_current_state` directly to **Delta Lake via `delta-rs`**.                                                                                                                     |
 
 ---
 
@@ -150,13 +150,13 @@ flowchart TD
 
 #### How Query, Query Handler, Apache DataFusion, and Materialized View Work Together:
 
-| Component | Concrete Implementation | Role in CQRS / ES Query Model |
-| :--- | :--- | :--- |
-| **Query** | `GetOrderQuery`<br/>`ListOrdersQuery` | **Read Contract:** Side-effect-free request describing what state to retrieve without mutating any domain aggregate. |
-| **Query Handler** | `QueriesHandler`<br/>(`ferrous-api/src/handlers/queries.rs`) | **Read Coordinator:** Translates incoming REST queries into parameterized SQL, invokes the embedded DataFusion query engine, and maps Arrow batches into typed View DTOs. |
-| **Query Engine** | **Apache DataFusion**<br/>(`ferrous-api/src/query_engine.rs`) | **In-Process SQL Engine:** Executes vectorized SQL queries (<3ms P95) directly against registered Delta Lake `TableProvider` views with zero external DB proxy overhead. |
-| **Materialized View** | **Delta Lake** (`orders_current_state`, `orders_raw_events`) | **Read-Optimized Store:** Pre-folded snapshots written by `Projection` via `delta-rs`, optimized for fast point lookups and filtered listings without replaying SierraDB event streams. |
-| **View (DTO)** | `OrderDetailResponse`<br/>`OrderListResponse` | **Projected Output:** Immutable, client-facing representation shaped specifically for UI/API consumption. |
+| Component             | Concrete Implementation                                       | Role in CQRS / ES Query Model                                                                                                                                                           |
+| :-------------------- | :------------------------------------------------------------ | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Query**             | `GetOrderQuery`<br/>`ListOrdersQuery`                         | **Read Contract:** Side-effect-free request describing what state to retrieve without mutating any domain aggregate.                                                                    |
+| **Query Handler**     | `QueriesHandler`<br/>(`ferrous-api/src/handlers/queries.rs`)  | **Read Coordinator:** Translates incoming REST queries into parameterized SQL, invokes the embedded DataFusion query engine, and maps Arrow batches into typed View DTOs.               |
+| **Query Engine**      | **Apache DataFusion**<br/>(`ferrous-api/src/query_engine.rs`) | **In-Process SQL Engine:** Executes vectorized SQL queries (<3ms P95) directly against registered Delta Lake `TableProvider` views with zero external DB proxy overhead.                |
+| **Materialized View** | **Delta Lake** (`orders_current_state`, `orders_raw_events`)  | **Read-Optimized Store:** Pre-folded snapshots written by `Projection` via `delta-rs`, optimized for fast point lookups and filtered listings without replaying SierraDB event streams. |
+| **View (DTO)**        | `OrderDetailResponse`<br/>`OrderListResponse`                 | **Projected Output:** Immutable, client-facing representation shaped specifically for UI/API consumption.                                                                               |
 
 ---
 
@@ -184,39 +184,43 @@ The frontend adopts a responsive 3-column layout designed specifically for enter
 ```
 
 ### 1. RxJS Unidirectional Reactive Bridge
+
 To guarantee predictable state management and handle high-throughput streaming events, an **RxJS observable pipeline** acts as the bridge between Axum's SSE stream and SvelteKit Runes:
 
 $$\text{Axum SSE Stream} \xrightarrow{\text{EventSource / Fetch}} \textbf{RxJS Observable Pipeline} \xrightarrow{\text{Operators (map/filter/buffer)}} \textbf{Svelte 5 Runes } (\$state)$$
 
-* **Unidirectional Flow:** SSE events enter RxJS observables, pass through pipeline operators (buffering tokens, handling backpressure, and routing tool-execution payloads), and update Svelte 5 `$state` runes.
-* **Component Reactivity:** UI components purely read from `$state` and `$derived` runes; they never mutate streaming state directly.
+- **Unidirectional Flow:** SSE events enter RxJS observables, pass through pipeline operators (buffering tokens, handling backpressure, and routing tool-execution payloads), and update Svelte 5 `$state` runes.
+- **Component Reactivity:** UI components purely read from `$state` and `$derived` runes; they never mutate streaming state directly.
 
 ### 2. Atomic Design Hierarchy
-* **Atoms (Pre-built shadcn-svelte):** Primitive building blocks (`Button`, `Card`, `Badge`, `Accordion`, `Input`, `Separator`, `ScrollArea`).
-* **Molecules (Pure Visual Presentation):** Stateless composite components maintaining zero business logic:
-  * `ChatMessageBubble`: Displays message text and formatting.
-  * `LatencyPill`: Formats query execution time (`2.4ms`) and engine badges.
-  * `ToolCallHeader`: Renders tool name, status spinner, and arguments summary.
-  * `ApprovalCardFrame`: Visual frame and action buttons for HITL prompts.
-* **Organisms (Business Logic & State):** Domain-aware components connected to RxJS streams and Svelte runes:
-  * `CopilotSidecarWorkbench`: Orchestrates message dispatch, thought accordions, and active tool calls.
-  * `OrderResolutionCanvas`: Subscribes to order selection state, rendering live Olist items, timelines, and customer metrics.
-  * `HitlApprovalWidget`: Handles approval/rejection button clicks and dispatches state-change mutations to the API gateway (`ferrous-api`).
-  * `ProviderSettingsModal`: Manages user-supplied API keys (OpenAI, Anthropic, Google AI Studio, OpenRouter) stored locally in the browser.
+
+- **Atoms (Pre-built shadcn-svelte):** Primitive building blocks (`Button`, `Card`, `Badge`, `Accordion`, `Input`, `Separator`, `ScrollArea`).
+- **Molecules (Pure Visual Presentation):** Stateless composite components maintaining zero business logic:
+  - `ChatMessageBubble`: Displays message text and formatting.
+  - `LatencyPill`: Formats query execution time (`2.4ms`) and engine badges.
+  - `ToolCallHeader`: Renders tool name, status spinner, and arguments summary.
+  - `ApprovalCardFrame`: Visual frame and action buttons for HITL prompts.
+- **Organisms (Business Logic & State):** Domain-aware components connected to RxJS streams and Svelte runes:
+  - `CopilotSidecarWorkbench`: Orchestrates message dispatch, thought accordions, and active tool calls.
+  - `OrderResolutionCanvas`: Subscribes to order selection state, rendering live Olist items, timelines, and customer metrics.
+  - `HitlApprovalWidget`: Handles approval/rejection button clicks and dispatches state-change mutations to the API gateway (`ferrous-api`).
+  - `ProviderSettingsModal`: Manages user-supplied API keys (OpenAI, Anthropic, Google AI Studio, OpenRouter) stored locally in the browser.
 
 ---
 
 ## ⚡ High-Performance Rust Stack
 
-* **API Service (`ferrous-api`):** **Rust / Axum** driven by **Goa Design v3** declarative contracts, compiling OpenAPI v3 specs into strongly typed Rust server traits via `rust-axum` and synchronizing live browser state via native **Axum SSE** (`axum::response::sse::Sse`).
-* **LLM Orchestration:** **`rig` (`rig-core`)** for pure-Rust agent pipelines, prompt construction, native tool execution, and direct Hugging Face integration via `rig::providers::huggingface` (`huggingface::QWEN2_5`).
-* **Analytical Query Engine:** **Apache DataFusion** executing vectorized SQL scans in <3ms directly against Delta Lake Parquet tables, embedded in-process in `ferrous-api` and `ferrous-cqrses` for sub-millisecond historical analytics.
-* **Transactional Event Store:** **SierraDB** (`sierradb`), pure-Rust RESP3 distributed event store providing sub-millisecond atomic append operations (`EAPPEND`), event stream scanning (`ESCAN`), and version checks (`ESVER`) with optimistic concurrency control for `ferrous-cqrses` aggregates.
-* **Message Broker & Lakehouse Sinks:** **Apache Iggy** for ultra-high throughput event and conversation telemetry streaming with built-in native **`delta_sink`** connector streaming directly to Delta Lake Parquet tables in `/data/delta/` (`orders_raw_events`, `orders_current_state`, `olist_orders`, `hpc_benchmarks`) with strict `schema = "json"` invariants.
-* **CQRS-ES Engine (`ferrous-cqrses`):** Pure-Rust Domain-Driven CQRS/ES engine built on the `cqrs-es` crate. Under Topology A, `ferrous-api` hosts the synchronous `CommandHandler` backed by SierraDB (`EventStore`) enforcing invariants ($20 courtesy credit cap, lifecycle states) before committing atomic event streams (`EAPPEND`), and dispatches committed domain state to Apache Iggy (`orders/consolidated`). The `Projection` (`order-projection`, `cg-order-projection`) consumes `orders/consolidated`, writes materialized snapshots to Delta Lake via `delta-rs`, and publishes callbacks to `orders/callback`, where `Callback Service` (`cg-order-callback`) runs the same `ESCAN` → Rehydrate Aggregate → Invariant Evaluation → `EAPPEND` pipeline against SierraDB. Meanwhile, `orders/intake` is used directly by `stream-replay-rs` to inject raw data into Delta Lake (`orders_raw_events`).
+- **API Service (`ferrous-api`):** **Rust / Axum** driven by **Goa Design v3** declarative contracts, compiling OpenAPI v3 specs into strongly typed Rust server traits via `rust-axum` and synchronizing live browser state via native **Axum SSE** (`axum::response::sse::Sse`).
+- **LLM Orchestration:** **`rig` (`rig-core`)** for pure-Rust agent pipelines, prompt construction, native tool execution, and direct Hugging Face integration via `rig::providers::huggingface` (`huggingface::QWEN2_5`).
+- **Analytical Query Engine:** **Apache DataFusion** executing vectorized SQL scans in <3ms directly against Delta Lake Parquet tables, embedded in-process in `ferrous-api` and `ferrous-cqrses` for sub-millisecond historical analytics.
+- **Transactional Event Store:** **SierraDB** (`sierradb`), pure-Rust RESP3 distributed event store providing sub-millisecond atomic append operations (`EAPPEND`), event stream scanning (`ESCAN`), and version checks (`ESVER`) with optimistic concurrency control for `ferrous-cqrses` aggregates.
+- **Message Broker & Lakehouse Sinks:** **Apache Iggy** for ultra-high throughput event and conversation telemetry streaming with built-in native **`delta_sink`** connector streaming directly to Delta Lake Parquet tables in `/data/delta/` (`orders_raw_events`, `orders_current_state`, `olist_orders`, `hpc_benchmarks`) with strict `schema = "json"` invariants.
+- **CQRS-ES Engine (`ferrous-cqrses`):** Pure-Rust Domain-Driven CQRS/ES engine built on the `cqrs-es` crate. Under Topology A, `ferrous-api` hosts the synchronous `CommandHandler` backed by SierraDB (`EventStore`) enforcing invariants ($20 courtesy credit cap, lifecycle states) before committing atomic event streams (`EAPPEND`), and dispatches committed domain state to Apache Iggy (`orders/consolidated`). The `Projection` (`order-projection`, `cg-order-projection`) consumes `orders/consolidated`, writes materialized snapshots to Delta Lake via `delta-rs`, and publishes callbacks to `orders/callback`, where `Callback Service` (`cg-order-callback`) runs the same `ESCAN` → Rehydrate Aggregate → Invariant Evaluation → `EAPPEND` pipeline against SierraDB. Meanwhile, `orders/intake` is used directly by `stream-replay-rs` to inject raw data into Delta Lake (`orders_raw_events`).
 
 ### Direct `rig` + `DataFusion` Integration
+
 Tools implement `rig::tool::Tool` and directly hold an `Arc<SessionContext>`:
+
 ```rust
 pub struct LakehouseOrderQueryTool {
     pub df_ctx: Arc<SessionContext>,
@@ -245,42 +249,59 @@ impl Tool for LakehouseOrderQueryTool {
 `stream-replay-rs` ([reidlai/stream-replay-rs](https://github.com/reidlai/stream-replay-rs)) is the **generic, independent** replayer used by this repository to turn the Olist dataset into live traffic. It knows nothing about FerrousCX: the dataset, the replay profiles and the topics (`orders/intake`, `benchmark/hpc_mqbench`) belong to `ferrous-cx`. It is never controlled from the UI, the API or the agent.
 
 ### Key Capabilities
-* **Dual Format:** Usable as a standalone CLI tool (`cargo install`) and as an embeddable library crate dependency in other Rust services.
-* **Dataset Agnostic:** Ingests CSV, Parquet or JSONL files (`--input-file-format parquet --input-file-path <path>`) across arbitrary domains.
-* **Pluggable Multi-Sink Architecture:** Dispatches events natively to Apache Iggy (`--sink iggy`, batched per-partition HTTP workers at 135k–155k+ msg/s), Kafka (`--sink kafka`), NATS JetStream (`--sink nats`), Fluvio (`--sink fluvio`), Eclipse iceoryx2 zero-copy IPC (`--sink iceoryx2`), or terminal inspection (`--sink stdout`).
-* **Timestamp Rebasing and Speed:** Rebases historical event timestamps onto the live clock and paces them by `--speed` (default `1.0`, original spacing) or by a fixed `--rate` in events per second. The two are mutually exclusive.
+
+- **Dual Format:** Usable as a standalone CLI tool (`cargo install`) and as an embeddable library crate dependency in other Rust services.
+- **Dataset Agnostic:** Ingests CSV, Parquet or JSONL files (`--input-file-format parquet --input-file-path <path>`) across arbitrary domains.
+- **Pluggable Multi-Sink Architecture:** Dispatches events natively to Apache Iggy (`--sink iggy`, batched per-partition HTTP workers at 135k–155k+ msg/s), Kafka (`--sink kafka`), NATS JetStream (`--sink nats`), Fluvio (`--sink fluvio`), Eclipse iceoryx2 zero-copy IPC (`--sink iceoryx2`), or terminal inspection (`--sink stdout`).
+- **Timestamp Rebasing and Speed:** Rebases historical event timestamps onto the live clock and paces them by `--speed` (default `1.0`, original spacing) or by a fixed `--rate` in events per second. The two are mutually exclusive.
 
 ---
 
 ## 📊 Flagship Scenario & Playback Calibration
 
 ### 1. Olist Brazilian E-Commerce Dataset (Flagship for Release 1)
-* **Purpose:** Retail customer support, order fulfillment, shipping delay mitigation, and sentiment analysis.
-* **Schema:** Relational Parquet tables including `orders`, `order_items`, `customers`, `payments`, `reviews`, and `sellers`.
-* **Execution:** Queried in real-time by `rig` agents via `DataFusion`, with order events replayed live through `stream-replay-rs` into `Apache Iggy` $\rightarrow$ native `delta_sink` connector $\rightarrow$ `Delta Lake`.
+
+- **Purpose:** Retail customer support, order fulfillment, shipping delay mitigation, and sentiment analysis.
+- **Schema:** Relational Parquet tables including `orders`, `order_items`, `customers`, `payments`, `reviews`, and `sellers`.
+- **Execution:** Queried in real-time by `rig` agents via `DataFusion`, with order events replayed live through `stream-replay-rs` into `Apache Iggy` $\rightarrow$ native `delta_sink` connector $\rightarrow$ `Delta Lake`.
 
 ### 2. Replay Profiles: Demo (10x) and Load (`--rate 25`)
+
 `ferrous-cx` ships two replay profiles targeting `orders/intake` on Apache Iggy (`http://127.0.0.1:3000`). The replayer itself defaults to speed `1.0`; the profile sets the speed.
 
-* The flagship Brazilian Olist e-commerce dataset contains **100,000 orders** spanning **730 days** (1,051,200 minutes).
-* **Historical Baseline Arrival Rate**:
+- The flagship Brazilian Olist e-commerce dataset contains **100,000 orders** spanning **730 days** (1,051,200 minutes).
+- **Historical Baseline Arrival Rate**:
   $$\text{Rate}_{\text{historical}} = \frac{100,000 \text{ orders}}{1,051,200 \text{ minutes}} \approx 0.095 \text{ orders/min}$$
-* **Demo profile (`--speed 10x`)**:
+- **Demo profile (`--speed 10x`)**:
   $$\text{Rate}_{\text{accelerated}} = 0.095 \times 10 \approx 0.95 \text{ orders/min} \approx \mathbf{1\text{ order/minute}}$$
   At **10x**, the steady-state arrival rate is **~1 order/minute**, keeping platform intake queues actively populated during live human inspection and interactive operator workflows without overwhelming development machines.
-* **Load profile (`--rate 25`)**: a fixed 25 events per second, ignoring the dataset's own spacing. It drives the SM-3 stability run (more than two hours, long enough for at least one dataset loop with `--loop-id-salt`) and the platform's HPC benchmark.
+- **Load profile (`--rate 25`)**: a fixed 25 events per second, ignoring the dataset's own spacing. It drives the SM-3 stability run (more than two hours, long enough for at least one dataset loop with `--loop-id-salt`) and the platform's HPC benchmark.
+
+#### Measured Live Throughput & End-to-End Qualification (`stream-replay-rs` → Apache Iggy → Delta Lake 2PC)
+
+While the Olist demo profile intentionally throttles to ~1 order/min for human UI observation, the underlying Rust ingestion pipeline operates orders of magnitude faster on a single local Docker Desktop host (4 partitions, 256-byte JSON payloads):
+
+| Profile / Mode | Command | Records | Throughput | Verification / Latency |
+| :--- | :--- | :---: | :---: | :--- |
+| **Olist Demo (`10x`)** | `stream-replay-rs --config profiles/olist-demo.toml` | Looping | **~1 order/min** | Human-paced UI demo (`10x` of `0.095 orders/min` historical rate) |
+| **Olist Load (`--rate 25`)** | `stream-replay-rs --config profiles/olist-load.toml` | Looping | **25 msg/s** | Sustained SM-3 stability run |
+| **Max Broker Ingestion (`--speed max`)** | `stream-replay-rs --input-file-path /tmp/hpc_1m.jsonl --sink iggy --sink-url http://127.0.0.1:3000 --topic benchmark/hpc_mqbench --speed max --no-loop` | **1,000,000** | **154,888 msg/s** | Dispatched in **6.46 s** across 4 batched Iggy partition workers |
+| **Full 3-Stage Live E2E (`run-hpc-benchmark`)** | `cargo run --release --bin run-hpc-benchmark -- --count 10000 --rate 0 --payload-size 256 --partitions 4` | **10,000** | **57,139 msg/s** | **`[QUALIFIED]`** (`10k Sent = 10k Iggy WAL = 10k Delta 2PC Distinct`) · Iggy WAL p50 **21.6 ms** / p99 **37.2 ms** · E2E Delta p50 **336.9 ms** / p99 **387.6 ms** |
 
 ### 3. Monotonic Timestamp Advancement & Primary Key Salting
-* **Monotonic Time Shifting**:
+
+- **Monotonic Time Shifting**:
   $$\text{Timestamp}_{\text{emitted}} = \text{Timestamp}_{\text{start}} + \frac{(\text{Timestamp}_{\text{record}} - \text{Timestamp}_{\text{first}}) + \text{loop\_count} \times \Delta_{\text{dataset}}}{\text{speed}}$$
   Guarantees strictly increasing streaming event watermarks with zero late-data drops or backward clock regressions across infinite looping simulations.
-* **Entity ID Salting**: Appends loop iteration markers (`_L1`, `_L2`) to entity primary keys (`order_id`) when `--loop-id-salt` is enabled, eliminating primary key deduplication collisions in downstream Delta Lake tables (`orders_raw_events`, `orders_current_state`).
+- **Entity ID Salting**: Appends loop iteration markers (`_L1`, `_L2`) to entity primary keys (`order_id`) when `--loop-id-salt` is enabled, eliminating primary key deduplication collisions in downstream Delta Lake tables (`orders_raw_events`, `orders_current_state`).
 
 ### 4. MultiWOZ (Multi-Domain Wizard-of-Oz)
-* **Purpose:** Multi-turn dialogue state tracking and cross-domain hotel, restaurant, and train bookings.
+
+- **Purpose:** Multi-turn dialogue state tracking and cross-domain hotel, restaurant, and train bookings.
 
 ### 5. Google Schema-Guided Dialogue (SGD)
-* **Purpose:** API-driven state transitions and strict microservice schema validation across 20+ domains.
+
+- **Purpose:** API-driven state transitions and strict microservice schema validation across 20+ domains.
 
 ---
 
@@ -313,16 +334,16 @@ ferrous-cx/ (This Repository - Core Public Repository: demo config, runtime stac
 
 `ferrous-cx` aggregates eight single-responsibility Git repositories as submodules. Each component is decoupled, contains its own documentation, pre-commit validation, and container builds. Dependencies point strictly one way: **a component must never include `ferrous-cx`, or a repository that contains it, as a submodule or path dependency** (AD-26).
 
-| # | Component | Repository | Architectural Role | Tech Stack |
-| :-: | :--- | :--- | :--- | :--- |
-| **1** | **`stream-replay-rs`** | [`reidlai/stream-replay-rs`](https://github.com/reidlai/stream-replay-rs) | Independent, dataset-agnostic multi-sink traffic replayer with timestamp rebasing and speed control | Pure-Rust CLI & Library Crate |
-| **2** | **`ferrous-iam`** | [`reidlai/ferrous-iam`](https://github.com/reidlai/ferrous-iam) | Identity & Access Management container engine (Kanidm pure-Rust IdP, OIDC/OAuth2). Platform personas (`seed-rbac.json`, `seed-m2m.json`) and TLS certificates are decoupled into and managed by `ferrous-cx`. | Pure-Rust Kanidm / Docker |
-| **3** | **`ferrous-vectordb`** | [`reidlai/ferrous-vectordb`](https://github.com/reidlai/ferrous-vectordb) | Qdrant vector database indexing enterprise SOPs & support transcripts | Qdrant Vector DB / FastEmbed |
-| **4** | **`ferrous-cqrses`** | [`reidlai/ferrous-cqrses`](https://github.com/reidlai/ferrous-cqrses) | Domain-Driven CQRS/ES Library (`cqrs-es`), Order Projection Daemon (`order-projection`), and Asynchronous Saga Process Manager Daemon (`order-saga`) with SierraDB EventStore | Pure-Rust Library Crate & Daemons |
-| **5** | **`ferrous-api`** | [`reidlai/ferrous-api`](https://github.com/reidlai/ferrous-api) | Contract-First Axum API Service (Goa DSL, rust-axum, in-process DataFusion <3ms SQL, Axum SSE, Asynchronous Settlement Callback Service) | Goa v3 / Axum / DataFusion |
-| **6** | **`ferrous-agent`** | [`reidlai/ferrous-agent`](https://github.com/reidlai/ferrous-agent) | Pure-Rust Multi-Provider AI Engine (`rig-core`), Context Sanitizer & In-Process Benchmarks | `rig-core` / Context Sanitizer |
-| **7** | **`ferrous-frontend`** | [`reidlai/ferrous-frontend`](https://github.com/reidlai/ferrous-frontend) | Svelte 5 + shadcn-svelte 3-column UI workbench, including the read-only Replay Monitor | Svelte 5 / shadcn-svelte / RxJS / Tailwind |
-| **8** | **`ferrous-reverseproxy`** | [`reidlai/ferrous-reverseproxy`](https://github.com/reidlai/ferrous-reverseproxy) | Zentinel (Cloudflare Pingora) Edge Reverse Proxy, TLS 1.3 Termination & OWASP WAF | Pure-Rust Zentinel / Pingora / CRS |
+|   #   | Component                  | Repository                                                                        | Architectural Role                                                                                                                                                                                            | Tech Stack                                 |
+| :---: | :------------------------- | :-------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | :----------------------------------------- |
+| **1** | **`stream-replay-rs`**     | [`reidlai/stream-replay-rs`](https://github.com/reidlai/stream-replay-rs)         | Independent, dataset-agnostic multi-sink traffic replayer with timestamp rebasing and speed control                                                                                                           | Pure-Rust CLI & Library Crate              |
+| **2** | **`ferrous-iam`**          | [`reidlai/ferrous-iam`](https://github.com/reidlai/ferrous-iam)                   | Identity & Access Management container engine (Kanidm pure-Rust IdP, OIDC/OAuth2). Platform personas (`seed-rbac.json`, `seed-m2m.json`) and TLS certificates are decoupled into and managed by `ferrous-cx`. | Pure-Rust Kanidm / Docker                  |
+| **3** | **`ferrous-vectordb`**     | [`reidlai/ferrous-vectordb`](https://github.com/reidlai/ferrous-vectordb)         | Qdrant vector database indexing enterprise SOPs & support transcripts                                                                                                                                         | Qdrant Vector DB / FastEmbed               |
+| **4** | **`ferrous-cqrses`**       | [`reidlai/ferrous-cqrses`](https://github.com/reidlai/ferrous-cqrses)             | Domain-Driven CQRS/ES Library (`cqrs-es`), Order Projection Daemon (`order-projection`), and Asynchronous Saga Process Manager Daemon (`order-saga`) with SierraDB EventStore                                 | Pure-Rust Library Crate & Daemons          |
+| **5** | **`ferrous-api`**          | [`reidlai/ferrous-api`](https://github.com/reidlai/ferrous-api)                   | Contract-First Axum API Service (Goa DSL, rust-axum, in-process DataFusion <3ms SQL, Axum SSE, Asynchronous Settlement Callback Service)                                                                      | Goa v3 / Axum / DataFusion                 |
+| **6** | **`ferrous-agent`**        | [`reidlai/ferrous-agent`](https://github.com/reidlai/ferrous-agent)               | Pure-Rust Multi-Provider AI Engine (`rig-core`), Context Sanitizer & In-Process Benchmarks                                                                                                                    | `rig-core` / Context Sanitizer             |
+| **7** | **`ferrous-frontend`**     | [`reidlai/ferrous-frontend`](https://github.com/reidlai/ferrous-frontend)         | Svelte 5 + shadcn-svelte 3-column UI workbench, including the read-only Replay Monitor                                                                                                                        | Svelte 5 / shadcn-svelte / RxJS / Tailwind |
+| **8** | **`ferrous-reverseproxy`** | [`reidlai/ferrous-reverseproxy`](https://github.com/reidlai/ferrous-reverseproxy) | Zentinel (Cloudflare Pingora) Edge Reverse Proxy, TLS 1.3 Termination & OWASP WAF                                                                                                                             | Pure-Rust Zentinel / Pingora / CRS         |
 
 > [!NOTE]
 > Following the streaming consolidation in Epic 16 and SierraDB deployment in Epic 17, `ferrous-streaming` and `iggy-kafka-bridge` were retired: Apache Iggy with native `delta_sink` connector, SierraDB (`sierradb`), and the `streaming-admin` administrative suite are orchestrated directly within `ferrous-cx`.
@@ -349,36 +370,39 @@ ferrous-cx/ (This Repository - Core Public Repository: demo config, runtime stac
 
 ### Runtime Topology
 
-| Component | Container Service | Primary Ports | Healthcheck Probe | Day-0 Hardened |
-| :--- | :--- | :---: | :--- | :---: |
-| `ferrous-iam` | `kanidmd` | `8443` (HTTPS), `3636` (LDAPS) | `/sbin/kanidmd version` | Read-only |
-| `ferrous-cx` | `ferrous-iggy-broker` | `3000` (HTTP), `8090` (TCP) | Iggy ping HTTP 200 | Yes |
-| `ferrous-cx` | `ferrous-sierradb` | `9090` (RESP3) | TCP port 9090 probe | Yes |
-| `ferrous-vectordb` | `ferrous-vectordb` | `6333` (HTTP), `6334` (gRPC) | `GET /readyz` HTTP 200 | Yes |
-| `ferrous-cqrses` | `order-projection` | Internal | `/order_projection --healthcheck` | Yes |
-| `ferrous-cqrses` | `order-saga` | Internal | `/order_saga --healthcheck` | Yes |
-| `ferrous-api` | `ferrous-api` | `8080` (HTTP) | `GET /health` HTTP 200 | Yes |
-| `ferrous-agent` | `ferrous-agent` | `8081` (HTTP) | `GET /health` HTTP 200 | Yes |
-| `ferrous-frontend` | `ferrous-frontend` | `5173` (HTTP) | `GET /health` HTTP 200 | Yes |
-| `ferrous-reverseproxy` | `ferrous-reverseproxy`| `80` (HTTP), `443` (HTTPS) | TCP port 80 check | Yes |
-| `ferrous-cx` | `jaeger` (ephemeral) | `16686` (UI), `4317` (gRPC), `4318` (HTTP) | `GET /` HTTP 200 | Yes |
+| Component              | Container Service      |               Primary Ports                | Healthcheck Probe                 | Day-0 Hardened |
+| :--------------------- | :--------------------- | :----------------------------------------: | :-------------------------------- | :------------: |
+| `ferrous-iam`          | `kanidmd`              |       `8443` (HTTPS), `3636` (LDAPS)       | `/sbin/kanidmd version`           |   Read-only    |
+| `ferrous-cx`           | `ferrous-iggy-broker`  |        `3000` (HTTP), `8090` (TCP)         | Iggy ping HTTP 200                |      Yes       |
+| `ferrous-cx`           | `ferrous-sierradb`     |               `9090` (RESP3)               | TCP port 9090 probe               |      Yes       |
+| `ferrous-vectordb`     | `ferrous-vectordb`     |        `6333` (HTTP), `6334` (gRPC)        | `GET /readyz` HTTP 200            |      Yes       |
+| `ferrous-cqrses`       | `order-projection`     |                  Internal                  | `/order_projection --healthcheck` |      Yes       |
+| `ferrous-cqrses`       | `order-saga`           |                  Internal                  | `/order_saga --healthcheck`       |      Yes       |
+| `ferrous-api`          | `ferrous-api`          |               `8080` (HTTP)                | `GET /health` HTTP 200            |      Yes       |
+| `ferrous-agent`        | `ferrous-agent`        |               `8081` (HTTP)                | `GET /health` HTTP 200            |      Yes       |
+| `ferrous-frontend`     | `ferrous-frontend`     |               `5173` (HTTP)                | `GET /health` HTTP 200            |      Yes       |
+| `ferrous-reverseproxy` | `ferrous-reverseproxy` |         `80` (HTTP), `443` (HTTPS)         | TCP port 80 check                 |      Yes       |
+| `ferrous-cx`           | `jaeger` (ephemeral)   | `16686` (UI), `4317` (gRPC), `4318` (HTTP) | `GET /` HTTP 200                  |      Yes       |
 
 ---
 
 ## 🛠️ Developer Quickstart
 
 ### Prerequisites
-* **Docker & Docker Compose:** v2.29+
-* **PowerShell 7+** (Windows) or **Bash** (macOS/Linux)
-* **Rust 1.80+** (required for `setup-topics`, `setup-iam`, and `stream-replay-rs`)
+
+- **Docker & Docker Compose:** v2.29+
+- **PowerShell 7+** (Windows) or **Bash** (macOS/Linux)
+- **Rust 1.80+** (required for `setup-topics`, `setup-iam`, and `stream-replay-rs`)
 
 ### 1. Clone the Public Repository
+
 ```bash
 git clone --recurse-submodules https://github.com/reidlai/ferrous-cx.git
 cd ferrous-cx
 ```
 
 ### 2. Configure Environment & Generate Dev TLS Certificates
+
 ```bash
 cp .env.example .env
 cp docker/.env.example docker/.env
@@ -388,13 +412,16 @@ cargo run --bin setup-iam -- --generate-certs
 ```
 
 ### 3. Launch the Unified Runtime Stack
+
 ```bash
 docker compose up -d
 docker compose ps
 ```
 
 ### 4. Provision Apache Iggy Topics, Delta Lake Storage, & IAM Personas
+
 The automated Cargo provisioners idempotently initialize all streams, topics, consumer groups, Delta Lake tables, and IAM personas:
+
 ```bash
 # Cross-Platform Unified Administration Suite (Cargo)
 cargo run --bin streaming-admin -- all --dry-run   # Full conformance audit across Steps 2 through 6
@@ -409,7 +436,9 @@ cargo run --bin setup-iam                         # Idempotent IAM setup
 ```
 
 ### 5. Replay Olist Traffic
+
 Produce real-world e-commerce traffic through native Apache Iggy stream ingestion (`http://127.0.0.1:3000` → `orders/intake`):
+
 ```bash
 # Option A: Run directly via Cargo
 # From a recursive standalone clone:
@@ -422,6 +451,7 @@ stream-replay-rs --config profiles/olist-demo.toml
 ```
 
 ### 6. Inspect Services & Observability
+
 - **Perimeter Reverse Proxy:** `https://localhost:443/` (or `http://localhost:80/`)
 - **Direct Frontend UI:** `http://localhost:5173/` (Operator Studio, strictly read-only)
 - **Distributed Traces (Jaeger):** `http://localhost:16686/`
@@ -441,6 +471,7 @@ stream-replay-rs --config profiles/olist-demo.toml
 ## 🔒 The One-Way Dependency Rule (AD-26)
 
 `ferrous-cx` acts as the root orchestrator and aggregator. To prevent circular dependencies:
+
 1. **No component submodule may reference `ferrous-cx`** in `.gitmodules`, configuration files, or source code.
 2. Component submodules are independently buildable, testable, and releasable.
 3. The automated audit script enforces this rule across all 8 component submodules:
@@ -448,7 +479,8 @@ stream-replay-rs --config profiles/olist-demo.toml
    powershell -ExecutionPolicy Bypass -File scripts/check-submodules.ps1
    # or: bash scripts/check-submodules.sh
    ```
-For contributors working on the BMAD planning artifacts and the components together:
+   For contributors working on the BMAD planning artifacts and the components together:
+
 ```bash
 git clone --recurse-submodules https://github.com/reidlai/ferrouscx-bmad.git
 cd ferrouscx-bmad
@@ -463,10 +495,10 @@ This walk-through is carried over from the former `ferrous-docker` README and ad
 
 ### Prerequisites
 
-| Tool | Version | Used for |
-| :--- | :--- | :--- |
-| Docker + Compose | `v2.29+` | Building images and running the stack |
-| Rust | `1.80+` | Building `streaming-admin`, `setup-iam`, and installing `stream-replay-rs` |
+| Tool             | Version  | Used for                                                                   |
+| :--------------- | :------- | :------------------------------------------------------------------------- |
+| Docker + Compose | `v2.29+` | Building images and running the stack                                      |
+| Rust             | `1.80+`  | Building `streaming-admin`, `setup-iam`, and installing `stream-replay-rs` |
 
 Make sure the submodules are checked out (`git submodule update --init --recursive`).
 
@@ -511,15 +543,15 @@ docker compose up -d
 docker compose ps        # wait until ferrous-iam, iggy-broker, sierradb, and vectordb report "healthy"
 ```
 
-| Service | Endpoint | Protocol / Role |
-| :--- | :--- | :--- |
-| Kanidm (IAM) | `https://localhost:8443` (self-signed cert), LDAPS `3636` | Pure-Rust Identity Provider |
-| Apache Iggy HTTP | `http://localhost:3000/ping` | Broker HTTP Management & Health |
-| Apache Iggy native TCP | `localhost:8090` | High-Throughput Streaming & WAL |
-| SierraDB Event Store | `localhost:9090` | Pure-Rust RESP3 Event Store (`EAPPEND`, `ESCAN`, `ESVER`) |
-| Qdrant Vector DB | `http://localhost:6333/readyz` | Vector DB for SOPs & Transcripts |
-| Ferrous API Gateway | `http://localhost:8080/health` | Axum API + SSE + In-Process DataFusion |
-| Frontend UI | `http://localhost:5173/` | Svelte 5 Operator Studio (read-only) |
+| Service                | Endpoint                                                  | Protocol / Role                                           |
+| :--------------------- | :-------------------------------------------------------- | :-------------------------------------------------------- |
+| Kanidm (IAM)           | `https://localhost:8443` (self-signed cert), LDAPS `3636` | Pure-Rust Identity Provider                               |
+| Apache Iggy HTTP       | `http://localhost:3000/ping`                              | Broker HTTP Management & Health                           |
+| Apache Iggy native TCP | `localhost:8090`                                          | High-Throughput Streaming & WAL                           |
+| SierraDB Event Store   | `localhost:9090`                                          | Pure-Rust RESP3 Event Store (`EAPPEND`, `ESCAN`, `ESVER`) |
+| Qdrant Vector DB       | `http://localhost:6333/readyz`                            | Vector DB for SOPs & Transcripts                          |
+| Ferrous API Gateway    | `http://localhost:8080/health`                            | Axum API + SSE + In-Process DataFusion                    |
+| Frontend UI            | `http://localhost:5173/`                                  | Svelte 5 Operator Studio (read-only)                      |
 
 ### 5. Provision Topics, Consumer Groups, Delta Lake Storage, & IAM Personas
 
