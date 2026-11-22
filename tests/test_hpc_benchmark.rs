@@ -57,8 +57,12 @@ fn test_replay_profile_toml_contract() {
         Some("iggy")
     );
     assert_eq!(
+        sink.get("default_url").and_then(|v| v.as_str()),
+        Some("http://127.0.0.1:3000")
+    );
+    assert_eq!(
         sink.get("destination").and_then(|v| v.as_str()),
-        Some("benchmark.hpc_mqbench")
+        Some("benchmark/hpc_mqbench")
     );
 }
 
@@ -75,7 +79,7 @@ fn test_run_hpc_benchmark_qualified_json_and_endpoints() {
             "--sink",
             "iggy",
             "--sink-url",
-            "127.0.0.1:9092",
+            "http://127.0.0.1:3000",
             "--iggy-url",
             "http://127.0.0.1:3000",
             "--query-url",
@@ -92,20 +96,20 @@ fn test_run_hpc_benchmark_qualified_json_and_endpoints() {
     let res: serde_json::Value = serde_json::from_str(&stdout).expect("parse JSON output");
 
     assert_eq!(res["status"], "QUALIFIED");
+    assert_eq!(res["mode"], "offline (simulated)");
     assert!(res["disqualification_reason"].is_null());
     assert_eq!(res["endpoints"]["sink"], "iggy");
-    assert_eq!(res["endpoints"]["sink_url"], "127.0.0.1:9092");
+    assert_eq!(res["endpoints"]["sink_url"], "http://127.0.0.1:3000");
     assert_eq!(res["endpoints"]["iggy_url"], "http://127.0.0.1:3000");
+    assert_eq!(res["endpoints"]["query_url"], "http://127.0.0.1:8080");
 
     let replayer_cmd = res["replayer_command"].as_str().unwrap_or("");
     assert!(replayer_cmd.contains("stream-replay-rs --config benchmark/replay-profile.toml"));
-    assert!(replayer_cmd.contains("--sink iggy --sink-url 127.0.0.1:9092"));
-    assert!(replayer_cmd.contains("--topic benchmark.hpc_mqbench --rate 25"));
+    assert!(replayer_cmd.contains("--sink iggy --sink-url http://127.0.0.1:3000"));
+    assert!(replayer_cmd.contains("--topic benchmark/hpc_mqbench --rate 25 --no-loop"));
 
     assert_eq!(res["accounting"]["sent_records"], 200);
-    assert_eq!(res["accounting"]["bridge_accepted"], 200);
     assert_eq!(res["accounting"]["iggy_stored"], 200);
-    assert_eq!(res["accounting"]["arroyo_processed"], 200);
     assert_eq!(res["accounting"]["delta_stored"], 200);
     assert_eq!(res["accounting"]["distinct_delta_records"], 200);
 }

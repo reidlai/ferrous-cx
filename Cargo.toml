@@ -25,7 +25,12 @@ path = "src/bin/run_hpc_benchmark.rs"
 name = "streaming-admin"
 path = "src/bin/streaming_admin.rs"
 
+[[bin]]
+name = "delta-sink"
+path = "src/bin/delta_sink.rs"
+
 [dependencies]
+base64 = "0.22"
 clap = { version = "4.5", features = ["derive", "env"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

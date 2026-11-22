@@ -43,3 +43,13 @@ schema = "json"
 table_uri = "/data/delta/olist_orders"
 batch_size = 1000
 batch_timeout_ms = 1000
+
+# 4. HPC-MQBench Benchmark Sink: benchmark/hpc_mqbench -> /data/delta/hpc_benchmarks
+[[sinks]]
+name = "hpc_benchmarks_sink"
+stream = "benchmark"
+topic = "hpc_mqbench"
+schema = "json"
+table_uri = "/data/delta/hpc_benchmarks"
+batch_size = 2000
+batch_timeout_ms = 500

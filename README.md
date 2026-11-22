@@ -22,7 +22,7 @@
 3. **UI Architecture:** Strict **Atomic Design** hierarchy ensuring clean separation of presentation and business logic.
 4. **Backend API Service Layer:** **Rust / Axum** API Service driven by **Goa Design v3** contracts and `rust-axum` OpenAPI code generation, leveraging native **Axum SSE** for real-time browser synchronization and embedding in-process **Apache DataFusion** (<3ms SQL).
 5. **In-Memory Analytical Querying:** **Apache DataFusion** scanning **Delta Lake** Parquet tables in-process (<3ms query latency).
-6. **Traffic Simulation:** **`stream-replay-rs`** (Git submodule at project root), replaying historical Parquet/CSV datasets into **Apache Iggy** via Native TCP (port 8090) with real-time timestamp shifting.
+6. **Traffic Simulation:** **`stream-replay-rs`** (Git submodule at project root), replaying historical Parquet/CSV/JSONL datasets into **Apache Iggy** via its native batched HTTP sink (`http://127.0.0.1:3000`, `orders/intake` & `benchmark/hpc_mqbench`) with real-time timestamp shifting.
 7. **Flagship Scenario:** Brazilian E-Commerce dataset (**Olist**) for order tracking, shipment delay resolution, review analysis, and courtesy credits.
 
 ---
@@ -242,12 +242,12 @@ impl Tool for LakehouseOrderQueryTool {
 
 ## 🔄 Real-Time Traffic Simulation (`stream-replay-rs`)
 
-`stream-replay-rs` ([reidlai/stream-replay-rs](https://github.com/reidlai/stream-replay-rs)) is the **generic, independent** replayer used by this repository to turn the Olist dataset into live traffic. It knows nothing about FerrousCX: the dataset, the replay profiles and the topics (`olist/orders_stream`) belong to `ferrous-cx`. It is never controlled from the UI, the API or the agent.
+`stream-replay-rs` ([reidlai/stream-replay-rs](https://github.com/reidlai/stream-replay-rs)) is the **generic, independent** replayer used by this repository to turn the Olist dataset into live traffic. It knows nothing about FerrousCX: the dataset, the replay profiles and the topics (`orders/intake`, `benchmark/hpc_mqbench`) belong to `ferrous-cx`. It is never controlled from the UI, the API or the agent.
 
 ### Key Capabilities
 * **Dual Format:** Usable as a standalone CLI tool (`cargo install`) and as an embeddable library crate dependency in other Rust services.
 * **Dataset Agnostic:** Ingests CSV, Parquet or JSONL files (`--input-file-format parquet --input-file-path <path>`) across arbitrary domains.
-* **Pluggable Multi-Sink Architecture:** Dispatches events to a Kafka-protocol endpoint such as the Apache Iggy gateway (`--sink kafka`), NATS JetStream (`--sink nats`), Fluvio (`--sink fluvio`), Eclipse iceoryx2 zero-copy IPC (`--sink iceoryx2`), or terminal inspection (`--sink stdout`).
+* **Pluggable Multi-Sink Architecture:** Dispatches events natively to Apache Iggy (`--sink iggy`, batched per-partition HTTP workers at 135k–155k+ msg/s), Kafka (`--sink kafka`), NATS JetStream (`--sink nats`), Fluvio (`--sink fluvio`), Eclipse iceoryx2 zero-copy IPC (`--sink iceoryx2`), or terminal inspection (`--sink stdout`).
 * **Timestamp Rebasing and Speed:** Rebases historical event timestamps onto the live clock and paces them by `--speed` (default `1.0`, original spacing) or by a fixed `--rate` in events per second. The two are mutually exclusive.
 
 ---
@@ -260,7 +260,7 @@ impl Tool for LakehouseOrderQueryTool {
 * **Execution:** Queried in real-time by `rig` agents via `DataFusion`, with order events replayed live through `stream-replay-rs` into `Apache Iggy` $\rightarrow$ native `delta_sink` connector $\rightarrow$ `Delta Lake`.
 
 ### 2. Replay Profiles: Demo (10x) and Load (`--rate 25`)
-`ferrous-cx` ships two replay profiles for `olist/orders_stream`. The replayer itself defaults to speed `1.0`; the profile sets the speed.
+`ferrous-cx` ships two replay profiles targeting `orders/intake` on Apache Iggy (`http://127.0.0.1:3000`). The replayer itself defaults to speed `1.0`; the profile sets the speed.
 
 * The flagship Brazilian Olist e-commerce dataset contains **100,000 orders** spanning **730 days** (1,051,200 minutes).
 * **Historical Baseline Arrival Rate**:
@@ -409,7 +409,7 @@ cargo run --bin setup-iam                         # Idempotent IAM setup
 ```
 
 ### 5. Replay Olist Traffic
-Produce real-world e-commerce traffic through native Apache Iggy stream ingestion (`127.0.0.1:8090`):
+Produce real-world e-commerce traffic through native Apache Iggy stream ingestion (`http://127.0.0.1:3000` → `orders/intake`):
 ```bash
 # Option A: Run directly via Cargo
 # From a recursive standalone clone:
@@ -443,7 +443,7 @@ stream-replay-rs --config profiles/olist-demo.toml
 `ferrous-cx` acts as the root orchestrator and aggregator. To prevent circular dependencies:
 1. **No component submodule may reference `ferrous-cx`** in `.gitmodules`, configuration files, or source code.
 2. Component submodules are independently buildable, testable, and releasable.
-3. The automated audit script enforces this rule across all 10 component repositories:
+3. The automated audit script enforces this rule across all 8 component submodules:
    ```bash
    powershell -ExecutionPolicy Bypass -File scripts/check-submodules.ps1
    # or: bash scripts/check-submodules.sh
@@ -459,7 +459,7 @@ git submodule update --init --recursive
 
 ## 🚀 Local Demo Stack: Provision Services & Run `stream-replay-rs`
 
-This walk-through is carried over from the former `ferrous-docker` README and adapted to the consolidated platform. It describes how to bring the stack up and drive it with the `stream-replay-rs` CLI for a local demo or manual testing. Paths assume the compose stack lives under `docker/` in this repository; run every command from the `ferrous-cx` checkout root.
+This walk-through is carried over from the former `ferrous-docker` README and adapted to the consolidated platform. It describes how to bring the stack up and drive it with the `stream-replay-rs` CLI for a local demo or manual testing. `docker-compose.yml` lives at the `ferrous-cx` checkout root; run every command from there.
 
 ### Prerequisites
 

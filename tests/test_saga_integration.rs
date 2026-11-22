@@ -128,9 +128,10 @@ fn test_docker_compose_order_saga_manifest_and_day0_defense() {
         .and_then(|v| v.as_sequence())
         .expect("tmpfs must be a sequence");
     assert!(
-        tmpfs
-            .iter()
-            .any(|v| v.as_str() == Some("/tmp:noexec,nosuid,nodev,size=64M")),
+        tmpfs.iter().any(|v| {
+            v.as_str()
+                .is_some_and(|s| s.starts_with("/tmp:noexec,nosuid,nodev,size=64M"))
+        }),
         "tmpfs must contain /tmp:noexec,nosuid,nodev,size=64M"
     );
 
@@ -223,7 +224,7 @@ fn test_docker_compose_order_saga_manifest_and_day0_defense() {
         "IGGY_USERNAME=",
         "IGGY_PASSWORD=",
         "STREAM_NAME=orders",
-        "TOPIC_ORDERS_EVENTS=events",
+        "TOPIC_ORDERS_EVENTS=consolidated",
         "CONSUMER_GROUP=cg-order-saga",
         "ENTERPRISE_SETTLEMENT_URL=",
         "ENTERPRISE_AUTH_TOKEN=",

@@ -1069,9 +1069,9 @@ mod tests {
     #[test]
     fn test_table_spec_invariants() {
         assert_eq!(TABLES.len(), 4);
-        assert_eq!(STREAMING_TOPICS.len(), 2);
+        assert_eq!(STREAMING_TOPICS.len(), 3);
         assert_eq!(BENCHMARK_TOPICS.len(), 1);
         assert_eq!(OLIST_TOPICS.len(), 1);
-        assert_eq!(CONSUMER_GROUPS.len(), 5);
+        assert_eq!(CONSUMER_GROUPS.len(), 7);
     }
 }

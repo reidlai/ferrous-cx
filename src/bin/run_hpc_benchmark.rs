@@ -2,9 +2,9 @@
 
 use clap::Parser;
 use ferrous_cx::benchmark_runner::{
-    format_report, run_benchmark, BenchmarkConfig, BenchmarkEndpoints, DEFAULT_ARROYO_API_URL,
-    DEFAULT_BENCHMARK_TOPIC, DEFAULT_IGGY_HTTP_URL, DEFAULT_QUERY_SERVICE_URL,
-    DEFAULT_REPLAY_PROFILE_PATH, DEFAULT_SINK_TYPE, DEFAULT_SINK_URL,
+    format_report, run_benchmark, BenchmarkConfig, BenchmarkEndpoints, DEFAULT_BENCHMARK_TOPIC,
+    DEFAULT_IGGY_HTTP_URL, DEFAULT_QUERY_SERVICE_URL, DEFAULT_REPLAY_PROFILE_PATH,
+    DEFAULT_SINK_TYPE, DEFAULT_SINK_URL,
 };
 use std::path::PathBuf;
 
@@ -18,7 +18,7 @@ struct Args {
     #[arg(long, default_value_t = 1000)]
     count: u64,
 
-    /// Target ingestion rate in messages per second
+    /// Target ingestion rate in messages per second (0 = unthrottled --speed max)
     #[arg(long, default_value_t = 25)]
     rate: u64,
 
@@ -58,11 +58,7 @@ struct Args {
     #[arg(long, env = "IGGY_HTTP_URL", default_value = DEFAULT_IGGY_HTTP_URL)]
     iggy_url: String,
 
-    /// Arroyo API URL (legacy placeholder)
-    #[arg(long, env = "ARROYO_API_URL", default_value = DEFAULT_ARROYO_API_URL)]
-    arroyo_url: String,
-
-    /// Query Service HTTP API URL for Delta Lake reconciliation
+    /// Ferrous API HTTP URL for Delta Lake / DataFusion reconciliation
     #[arg(long, env = "QUERY_SERVICE_URL", default_value = DEFAULT_QUERY_SERVICE_URL)]
     query_url: String,
 
@@ -110,7 +106,6 @@ async fn main() {
             sink: args.sink,
             sink_url: args.sink_url,
             iggy_url: args.iggy_url,
-            arroyo_url: args.arroyo_url,
             query_url: args.query_url,
         },
     };
