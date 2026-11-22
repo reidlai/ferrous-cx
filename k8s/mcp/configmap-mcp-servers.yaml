@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ferrous-agent-mcp-servers
+  namespace: ferrous
+  labels:
+    app.kubernetes.io/part-of: ferrous-cx
+data:
+  mcp-servers.toml: |
+    [[servers]]
+    name = "orders"
+    url = "http://ferrous-api.ferrous.svc.cluster.local:8080/mcp"
+    transport = "streamable_http"
+    timeout_ms = 5000
+    auth_env = "KANIDM_SERVICE_TOKEN"
+    allowed_tools = ["get_order", "list_orders", "propose_courtesy_credit"]

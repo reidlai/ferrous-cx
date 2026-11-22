@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ferrous-agent
+  namespace: ferrous
+  labels:
+    app: ferrous-agent
+    app.kubernetes.io/part-of: ferrous-cx
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ferrous-agent
+  template:
+    metadata:
+      labels:
+        app: ferrous-agent
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+        - name: ferrous-agent
+          image: ferrous-agent:latest
+          ports:
+            - name: http
+              containerPort: 8081
+          env:
+            - name: MCP_SERVERS_CONFIG
+              value: /etc/ferrous-agent/mcp-servers.toml
+            - name: KANIDM_SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: ferrous-agent-secrets
+                  key: kanidm-service-token
+                  optional: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: mcp-config
+              mountPath: /etc/ferrous-agent
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: mcp-config
+          configMap:
+            name: ferrous-agent-mcp-servers
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ferrous-agent
+  namespace: ferrous
+  labels:
+    app: ferrous-agent
+spec:
+  selector:
+    app: ferrous-agent
+  ports:
+    - name: http
+      port: 8081
+      targetPort: 8081

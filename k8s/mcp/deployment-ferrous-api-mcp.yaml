@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ferrous-api
+  namespace: ferrous
+  labels:
+    app: ferrous-api
+    app.kubernetes.io/part-of: ferrous-cx
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ferrous-api
+  template:
+    metadata:
+      labels:
+        app: ferrous-api
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+        - name: ferrous-api
+          image: ferrous-api:latest
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ferrous-api
+  namespace: ferrous
+  labels:
+    app: ferrous-api
+spec:
+  selector:
+    app: ferrous-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

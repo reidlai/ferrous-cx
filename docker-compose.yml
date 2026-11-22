@@ -306,9 +306,13 @@ services:
       - HF_TOKEN=${HF_TOKEN:-}
       - QDRANT_URL=http://vectordb:6333
       - FERROUS_API_URL=http://ferrous-api:8080
+      - MCP_SERVERS_CONFIG=/etc/ferrous-agent/mcp-servers.toml
+      - KANIDM_SERVICE_TOKEN=${KANIDM_SERVICE_TOKEN:-}
       - OTEL_SDK_DISABLED=${OTEL_SDK_DISABLED:-true}
       - OTEL_TRACES_EXPORTER=${OTEL_TRACES_EXPORTER:-console}
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
+    volumes:
+      - ./config/agent/mcp-servers.toml:/etc/ferrous-agent/mcp-servers.toml:ro
     depends_on:
       ferrous-api:
         condition: service_healthy

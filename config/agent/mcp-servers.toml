@@ -1,0 +1,11 @@
+# Declarative MCP Server Registry for ferrous-agent (Epic 20, AD-33)
+# Mounted read-only in Docker Compose or via Kubernetes ConfigMap.
+# Production containers strictly use Streamable HTTP (no stdio subprocesses, AD-24).
+
+[[servers]]
+name = "orders"
+url = "http://ferrous-api:8080/mcp"
+transport = "streamable_http"
+timeout_ms = 5000
+auth_env = "KANIDM_SERVICE_TOKEN"
+allowed_tools = ["get_order", "list_orders", "propose_courtesy_credit"]
