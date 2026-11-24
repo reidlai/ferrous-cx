@@ -47,18 +47,17 @@ flowchart TD
 
     subgraph API_Tier ["API Service (ferrous-api & ferrous-cqrses)"]
         Command["Domain Command<br/>• IssueCourtesyCreditCommand<br/>• CancelOrderCommand"]
-        CommandHandler["CommandHandler<br/>• 3. ESCAN from SierraDB<br/>• 4. Rehydrate Aggregate<br/>• 5. Invariant Evaluation<br/>• 6. EAPPEND to SierraDB<br/>• 7. Publish to orders/consolidated"]
-        CallbackService["Callback Service<br/>• Consumes orders/callback (cg-order-callback)<br/>• Rehydrates Aggregate (ESCAN)<br/>• Invariant Evaluation & EAPPEND to SierraDB"]
-        Aggregate["Aggregate (Domain Model)<br/>• State: Status, Cumulative Credit<br/>• Invariant: Max $20 credit ceiling<br/>• Produces: CourtesyCreditIssued, OrderCancelled, Settled"]
-        SierraDB[("SierraDB Event Store (Port 9090)<br/>• Pure-Rust RESP3 Protocol<br/>• ESCAN (Rehydrate) & EAPPEND (Atomic Append)")]
+        CommandHandler["CommandHandler<br/>• Rehydrate Aggregate<br/>• Invariant Evaluation<br/>• EAPPEND to SierraDB<br/>• Publish to consolidated topic"]
+        CallbackService["Callback Service<br/>• Consumes callback topic<br/>• Rehydrates Aggregate <br/>• Invariant Evaluation <br/>• EAPPEND to SierraDB"]
+        Aggregate["Aggregate (Domain Model)<br/>• ESCAN from SierraDB<br/>• State: Status, Cumulative Credit<br/>• Invariant Evaluation<br/>• Produces"]
+        SierraDB[("SierraDB Event Store")]
 
         Command -->|"2. Dispatch to Handler"| CommandHandler
         SierraDB -->|"3. ESCAN from SierraDB"| Aggregate
         Aggregate -->|"4. State to Handler"| CommandHandler
-        CommandHandler -->|"5. Invariant Evaluation"| Aggregate
-        CommandHandler -->|"6. EAPPEND Save to Stream"| SierraDB
-        CommandHandler -->|"7. Publish to orders/consolidated"| IggyConsolidated
-        CallbackService -->|"Rehydrate, Validate & EAPPEND"| SierraDB
+        CommandHandler -->|"5. EAPPEND to Stream"| SierraDB
+        CommandHandler -->|"6a. Publish to orders/consolidated"| IggyConsolidated
+        CallbackService -->|"11. EAPPEND to Stream"| SierraDB
 
     end
 
@@ -82,15 +81,17 @@ flowchart TD
 
     %% Step 1: User Command Ingestion
     Client -->|"1. Submit Request"| Command
-    CommandHandler -.->|"10. Live SSE Update"| Client
+    CommandHandler -.->|"6b. Live SSE Update"| Client
+
+    
+    %% Step 3: Projections & Delta Lake Write
+    IggyConsolidated -->|"7. Consume orders/consolidated"| Projection
+    Projection -->|"8. Commit Snapshots via delta-rs"| DeltaLake
+    Projection -->|"9. Publish to orders/callback if necessary"| IggyCallback
 
     %% Step 2: Callback Queue Ingestion
-    IggyCallback -->|"Consume Callback (cg-order-callback)"| CallbackService
+    IggyCallback -->|"10. Con (cg-s/rder-calback)"| CallbackService
 
-    %% Step 3: Projections & Delta Lake Write
-    IggyConsolidated -->|"8. Consume orders/consolidated"| Projection
-    Projection -->|"9. Commit Snapshots via delta-rs"| DeltaLake
-    Projection -->|"10. Publish to orders/callback"| IggyCallback
 ```
 
 #### How Command, Command Handler, Aggregate, Callback Service, and Projection Work Together:
