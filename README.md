@@ -262,8 +262,123 @@ impl Tool for LakehouseOrderQueryTool {
 ### 1. Olist Brazilian E-Commerce Dataset (Flagship for Release 1)
 
 - **Purpose:** Retail customer support, order fulfillment, shipping delay mitigation, and sentiment analysis.
-- **Schema:** Full 9-table relational SQL schema in TiDB (`config/tidb/schema.sql`): `olist_orders`, `olist_order_items`, `olist_order_payments`, `olist_order_reviews`, `olist_customers`, `olist_products`, `olist_sellers`, `olist_geolocation` (CEP-deduplicated), and `olist_category_translation`.
-- **Execution:** Replayed live through `stream-replay-rs` into **Apache Iggy** $\rightarrow$ custom pure-Rust **`tidb-sink`** $\rightarrow$ **TiDB**, and queried in real time by `ferrous-api` (`TiDbOrderQueryEngine`) and `rig` agents over `/mcp`.
+- **Schema:** Full **9-table** relational SQL schema in TiDB ([`config/tidb/schema.sql`](config/tidb/schema.sql)) matching the downloadable Kaggle [`olistbr/brazilian-ecommerce`](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce) dataset: `olist_orders`, `olist_order_items`, `olist_order_payments`, `olist_order_reviews`, `olist_customers`, `olist_products`, `olist_sellers`, `olist_geolocation` (CEP-deduplicated), and `olist_category_translation`.
+- **Execution:** Transactional fact tables stream live through `stream-replay-rs` into **Apache Iggy** $\rightarrow$ custom pure-Rust **`tidb-sink`** $\rightarrow$ **TiDB**; static reference dimensions batch-UPSERT via `streaming-admin load-olist-tidb`. Queried in real time by `ferrous-api` (`TiDbOrderQueryEngine`) and `rig` agents over `/mcp`.
+
+#### Complete 9-Table Olist Entity-Relationship Diagram (TiDB Schema, AD-34 / AD-35 / AD-36)
+
+```mermaid
+erDiagram
+    olist_orders ||--o{ olist_order_items : "order_id"
+    olist_orders ||--o{ olist_order_payments : "order_id"
+    olist_orders ||--o{ olist_order_reviews : "order_id"
+    olist_customers ||--|| olist_orders : "customer_id"
+    olist_products ||--o{ olist_order_items : "product_id"
+    olist_sellers ||--o{ olist_order_items : "seller_id"
+    olist_category_translation ||--o{ olist_products : "product_category_name"
+    olist_geolocation ||--o{ olist_customers : "zip_code_prefix"
+    olist_geolocation ||--o{ olist_sellers : "zip_code_prefix"
+
+    olist_orders {
+        string order_id PK
+        string customer_id FK
+        string order_status
+        datetime order_purchase_timestamp
+        datetime order_approved_at
+        datetime order_delivered_carrier_date
+        datetime order_delivered_customer_date
+        datetime order_estimated_delivery_date
+    }
+
+    olist_order_items {
+        string order_id PK,FK
+        int order_item_id PK
+        string product_id FK
+        string seller_id FK
+        datetime shipping_limit_date
+        double price
+        double freight_value
+    }
+
+    olist_order_payments {
+        string order_id PK,FK
+        int payment_sequential PK
+        string payment_type
+        int payment_installments
+        double payment_value
+    }
+
+    olist_order_reviews {
+        string review_id PK
+        string order_id PK,FK
+        int review_score
+        string review_comment_title
+        text review_comment_message
+        datetime review_creation_date
+        datetime review_answer_timestamp
+    }
+
+    olist_customers {
+        string customer_id PK
+        string customer_unique_id
+        string customer_zip_code_prefix FK
+        string customer_city
+        string customer_state
+    }
+
+    olist_products {
+        string product_id PK
+        string product_category_name FK
+        int product_name_lenght
+        int product_description_lenght
+        int product_photos_qty
+        double product_weight_g
+        double product_length_cm
+        double product_height_cm
+        double product_width_cm
+    }
+
+    olist_sellers {
+        string seller_id PK
+        string seller_zip_code_prefix FK
+        string seller_city
+        string seller_state
+    }
+
+    olist_geolocation {
+        string geolocation_zip_code_prefix PK
+        double geolocation_lat
+        double geolocation_lng
+        string geolocation_city
+        string geolocation_state
+    }
+
+    olist_category_translation {
+        string product_category_name PK
+        string product_category_name_english
+    }
+```
+
+#### 9-Table Olist Schema & FerrousCX Ingestion Map
+
+| # | Kaggle CSV File | TiDB Table | Primary / Join Keys | Ingestion Path |
+| :-: | :--- | :--- | :--- | :--- |
+| 1 | `olist_orders_dataset.csv` | `olist_orders` *(AD-34 base)* | PK: `order_id`, FK: `customer_id` | Streamed: `profiles/olist-demo.toml` → `olist/orders_stream` → `tidb-sink` |
+| 2 | `olist_order_items_dataset.csv` | `olist_order_items` | PK: `(order_id, order_item_id)`, FK: `product_id`, `seller_id` | Streamed: `profiles/olist-items.toml` → `olist/order_items_stream` → `tidb-sink` |
+| 3 | `olist_order_payments_dataset.csv` | `olist_order_payments` | PK: `(order_id, payment_sequential)` | Streamed: `profiles/olist-payments.toml` → `olist/order_payments_stream` → `tidb-sink` |
+| 4 | `olist_order_reviews_dataset.csv` | `olist_order_reviews` | PK: `(review_id, order_id)` | Streamed: `profiles/olist-reviews.toml` → `olist/order_reviews_stream` → `tidb-sink` |
+| 5 | `olist_customers_dataset.csv` | `olist_customers` | PK: `customer_id`, IDX: `customer_unique_id` | Batch UPSERT: `streaming-admin load-olist-tidb` |
+| 6 | `olist_products_dataset.csv` | `olist_products` | PK: `product_id`, FK: `product_category_name` | Batch UPSERT: `streaming-admin load-olist-tidb` |
+| 7 | `olist_sellers_dataset.csv` | `olist_sellers` | PK: `seller_id`, IDX: `seller_zip_code_prefix` | Batch UPSERT: `streaming-admin load-olist-tidb` |
+| 8 | `olist_geolocation_dataset.csv` | `olist_geolocation` | PK: `geolocation_zip_code_prefix` *(deduplicated)* | Batch UPSERT: `streaming-admin load-olist-tidb` (averaged lat/lng per CEP) |
+| 9 | `product_category_name_translation.csv` | `olist_category_translation` | PK: `product_category_name` | Batch UPSERT: `streaming-admin load-olist-tidb` |
+
+> [!TIP]
+> **Kaggle Olist Data Modeling Notes:**
+> - **`customer_id` vs `customer_unique_id`:** `olist_orders.customer_id` is generated *per order* (1:1 with `olist_customers.customer_id`). Repeat-buyer queries must group by `customer_unique_id`.
+> - **Exact Kaggle CSV Spelling:** `olist_products_dataset.csv` spells `product_name_lenght` and `product_description_lenght` with **`lenght`** — preserved verbatim in TiDB DDL for zero-translation loading.
+> - **Geolocation Deduplication:** Raw `olist_geolocation_dataset.csv` has many lat/lng rows per 5-digit CEP prefix; `streaming-admin load-olist-tidb` averages coordinates per `geolocation_zip_code_prefix` to prevent Cartesian join blow-ups.
+> - **Financial Totals:** `olist_orders` itself has no price or freight columns — item totals derive from `olist_order_items` (`SUM(price)`, `SUM(freight_value)`) and payment legs from `olist_order_payments` (`SUM(payment_value)`), overlaid with CQRS concessions in `orders_current_state`.
 
 ### 2. Replay Profiles: Demo (10x) and Load (`--rate 25`)
 
