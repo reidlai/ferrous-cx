@@ -20,9 +20,9 @@
 1. **Frontend:** **Svelte 5** + **shadcn-svelte** in a 3-column layout featuring a **Transparent Agentic Workbench** and **Human-in-the-Loop (HITL)** approval workflows.
 2. **Reactive Bridge:** **RxJS** unidirectional data stream bridging SSE events to Svelte 5 Runes.
 3. **UI Architecture:** Strict **Atomic Design** hierarchy ensuring clean separation of presentation and business logic.
-4. **Backend API Service Layer:** **Rust / Axum** API Service driven by **Goa Design v3** contracts and `rust-axum` OpenAPI code generation, leveraging native **Axum SSE** for real-time browser synchronization and embedding in-process **Apache DataFusion** (<3ms SQL).
-5. **In-Memory Analytical Querying:** **Apache DataFusion** scanning **Delta Lake** Parquet tables in-process (<3ms query latency).
-6. **Traffic Simulation:** **`stream-replay-rs`** (Git submodule at project root), replaying historical Parquet/CSV/JSONL datasets into **Apache Iggy** via its native batched HTTP sink (`http://127.0.0.1:3000`, `orders/intake` & `benchmark/hpc_mqbench`) with real-time timestamp shifting.
+4. **Backend API Service Layer:** **Rust / Axum** API Service driven by **Goa Design v3** contracts and `rust-axum` OpenAPI code generation, leveraging native **Axum SSE** for real-time browser synchronization and **`TiDbOrderQueryEngine`** (`sqlx` MySQL + `tls-rustls`) for indexed transactional SQL queries.
+5. **Transactional HTAP Persistence:** **TiDB** (`pingcap/tidb`, single-node `unistore` locally, distributed TiDB in Kubernetes) storing all **9 Kaggle Olist tables**, CQRS `orders_current_state`, `orders_raw_events`, and `hpc_benchmarks` with ACID `INSERT ... ON DUPLICATE KEY UPDATE` UPSERTs (**AD-36**).
+6. **Traffic Simulation:** **`stream-replay-rs`** (Git submodule at project root), replaying historical CSV/Parquet/JSONL datasets into **Apache Iggy** via its native batched HTTP sink (`http://127.0.0.1:3000`, `olist/*_stream`, `orders/intake`, `benchmark/hpc_mqbench`) with real-time timestamp shifting.
 7. **Flagship Scenario:** Brazilian E-Commerce dataset (**Olist**) for order tracking, shipment delay resolution, review analysis, and courtesy credits.
 
 ---
@@ -37,7 +37,7 @@ To clearly understand the operational boundaries and how domain components colla
 
 ### 1. CQRS / ES Component Collaboration (Write Path)
 
-The Write Path demonstrates how **Command**, **Command Handler**, **Aggregate**, **Event Store (SierraDB)**, and **Projections (Iggy & delta-rs)** collaborate to enforce business invariants, update read-model persistence, and stream real-time updates:
+The Write Path demonstrates how **Command**, **Command Handler**, **Aggregate**, **Event Store (SierraDB)**, and **Projections (Iggy & `TiDbProjectionStore`)** collaborate to enforce business invariants, update transactional read-model persistence in **TiDB**, and stream real-time updates:
 
 ```mermaid
 flowchart TD
@@ -70,27 +70,26 @@ flowchart TD
         Projection["Projection (order-projection)<br/>• Consumer Group: cg-order-projection<br/>• Pure Event Folding (Zero Side-Effects)"]
     end
 
-    subgraph Lakehouse_Tier ["Analytical Lakehouse Storage"]
-        DeltaLake[("Delta Lake Storage (/data/delta)<br/>• orders_current_state (Snapshots)<br/>• orders_raw_events (Audit Log)")]
+    subgraph Persistence_Tier ["Transactional HTAP Storage (TiDB, AD-36)"]
+        TiDB[("TiDB (:4000 MySQL / :10080 Status)<br/>• orders_current_state (CQRS UPSERTs)<br/>• 9 Kaggle Olist Tables (olist_*)<br/>• orders_raw_events & _iggy_sink_offsets")]
     end
 
     Client_Tier ~~~ API_Tier
     API_Tier ~~~ Streaming_Fabric
     Streaming_Fabric ~~~ Projection_Tier
-    Projection_Tier ~~~ Lakehouse_Tier
+    Projection_Tier ~~~ Persistence_Tier
 
     %% Step 1: User Command Ingestion
     Client -->|"1. Submit Request"| Command
     CommandHandler -.->|"6b. Live SSE Update"| Client
 
-    
-    %% Step 3: Projections & Delta Lake Write
+    %% Step 3: Projections & TiDB Transactional Write
     IggyConsolidated -->|"7. Consume orders/consolidated"| Projection
-    Projection -->|"8. Commit Snapshots via delta-rs"| DeltaLake
+    Projection -->|"8. ACID UPSERT via TiDbProjectionStore"| TiDB
     Projection -->|"9. Publish to orders/callback if necessary"| IggyCallback
 
     %% Step 2: Callback Queue Ingestion
-    IggyCallback -->|"10. Con (cg-s/rder-calback)"| CallbackService
+    IggyCallback -->|"10. Consume (cg-order-callback)"| CallbackService
 
 ```
 
@@ -103,35 +102,35 @@ flowchart TD
 | **Callback Service** | `Callback Service`<br/>(`ferrous-cqrses/src/domain/order/callback.rs`) | **Callback Stream Consumer:** Consumes inbound callback messages from Apache Iggy (`orders/callback`, `cg-order-callback`), executes the same `CommandHandler` pipeline (`ESCAN` rehydrate → invariant evaluation → `EAPPEND` to SierraDB), and notifies live SSE listeners.                                                                         |
 | **Aggregate**        | `Aggregate`<br/>(`ferrous-cqrses/src/domain/order/aggregate.rs`)       | **Guardian of Invariants:** Domain entity maintaining internal state purely from past events. Evaluates business rules: e.g. **maximum $20 cumulative courtesy credit**, order lifecycle state compatibility (`Delivered`/`InTransit`), and emits uncommitted **Domain Events** (`CourtesyCreditIssued`, `OrderCancelled`, `CourtesyCreditSettled`). |
 | **Event Store**      | `SierraDB` (Port 9090)<br/>(`sierra.rs`)                               | **Single Source of Truth:** Pure-Rust RESP3 append-only log. Ensures linear, atomic event ordering without table locks.                                                                                                                                                                                                                              |
-| **Iggy Topics**      | `orders/callback`, `orders/consolidated`                               | **`orders/callback`:** Inbound callback queue consumed by `Callback Service`. **`orders/consolidated`:** Committed snapshots/events for Delta Lake (`orders_current_state`) and `order-saga`.                                                                                                                                                        |
-| **Projection**       | `order-projection`<br/>(`ferrous-cqrses/src/bin/order_projection.rs`)  | **Read Model Materializer:** Consumes `orders/consolidated` under consumer group `cg-order-projection`, purely folds events into state snapshots, and persists `orders_current_state` directly to **Delta Lake via `delta-rs`**.                                                                                                                     |
+| **Iggy Topics**      | `orders/callback`, `orders/consolidated`, `olist/*_stream`             | **`orders/callback`:** Inbound callback queue consumed by `Callback Service`. **`orders/consolidated`:** Committed snapshots/events for TiDB (`orders_current_state`) and `order-saga`. **`olist/*_stream`:** Transactional Olist streams consumed by `tidb-sink`.                                                                                         |
+| **Projection**       | `order-projection`<br/>(`ferrous-cqrses/src/bin/order_projection.rs`)  | **Read Model Materializer:** Consumes `orders/consolidated` under consumer group `cg-order-projection`, folds events into canonical `AD-34` snapshots, and persists `orders_current_state` directly to **TiDB via `TiDbProjectionStore` (`sqlx` MySQL)**.                                                                                                  |
 
 ---
 
 ### 2. CQRS / ES Query Model (Read Flow)
 
-Following strict **CQRS / ES**, the **Query Model** is dedicated purely to read-only **Queries** and **Materialized Views** powered by **Apache DataFusion** as the query engine, completely decoupled from write-side aggregates, event stores, and downstream analytics/AI workloads:
+Following strict **CQRS / ES**, the **Query Model** is dedicated purely to read-only **Queries** and **Materialized Views** powered by **`TiDbOrderQueryEngine`** (`sqlx` MySQL + `tls-rustls`) against **TiDB** (`orders_current_state` + all 9 `olist_*` tables, **AD-36**), completely decoupled from write-side aggregates, event stores, and downstream analytics/AI workloads:
 
-> **Roadmap Note:** Analytics (OLAP/BI) and the Agentic Path (`ferrous-agent`, `rig-core`, `Qdrant Vector DB`) are deferred to a **future version** to keep the core CQRS/ES Read Flow strictly focused on Query & View execution.
+> **Roadmap Note:** Analytics (OLAP/BI) and the Agentic Path (`ferrous-agent`, `rig-core`, `Qdrant Vector DB`) are cleanly separated behind the `OrderQueryEngine` trait and `/mcp` Streamable HTTP boundary (`AD-30`, `AD-33`).
 
 ```mermaid
 flowchart TD
     subgraph Client_Read ["Client Tier"]
-        ClientUI["Client Application<br/>• Dispatches Read Queries (HTTP / REST)<br/>• Renders Projected Views"]
+        ClientUI["Client Application<br/>• Dispatches Read Queries (HTTP / REST / MCP)<br/>• Renders Projected Views"]
     end
 
     subgraph Query_Tier ["Query Model (ferrous-api)"]
         Query["Query (Read Contract)<br/>• GetOrderQuery (by order_id)<br/>• ListOrdersQuery (filter / pagination)"]
-        QueryHandler["Query Handler<br/>• Routes Query to DataFusion<br/>• Maps Arrow RecordBatches to View DTOs<br/><i>Ref: QueriesHandler (src/handlers/queries.rs)</i>"]
-        View["View (Read DTO)<br/>• OrderView / OrderListView<br/>• Read-Only Projected Response"]
+        QueryHandler["Query Handler<br/>• Routes Query to OrderQueryEngine<br/>• Maps SQL Rows to View DTOs<br/><i>Ref: QueriesHandler (src/handlers/queries.rs)</i>"]
+        View["View (Read DTO)<br/>• OrderDetails / OrderListResponse<br/>• Read-Only Projected Response"]
     end
 
-    subgraph Query_Engine_Tier ["Query Engine (In-Process)"]
-        DataFusion["Apache DataFusion<br/>• Embedded SessionContext<br/>• Vectorized SQL Execution (<3ms P95)<br/>• Delta TableProvider Catalog"]
+    subgraph Query_Engine_Tier ["Query Engine (ferrous-api)"]
+        TiDbEngine["TiDbOrderQueryEngine (sqlx MySQL)<br/>• Indexed Point Lookups & Pagination<br/>• Unified orders_current_state + olist_orders<br/>• Hydrates Items from olist_order_items"]
     end
 
-    subgraph Read_Store_Tier ["Materialized View Store"]
-        DeltaLake[("Delta Lake (/data/delta)<br/>• orders_current_state (Current View)<br/>• orders_raw_events (Event View)")]
+    subgraph Read_Store_Tier ["Transactional HTAP Store (TiDB, AD-36)"]
+        TiDB[("TiDB (:4000)<br/>• orders_current_state (CQRS View)<br/>• 9 Kaggle Olist Tables (olist_*)<br/>• orders_raw_events (Audit Log)")]
     end
 
     Client_Read ~~~ Query_Tier
@@ -141,23 +140,23 @@ flowchart TD
     %% Query & View Flow
     ClientUI -->|"1. Submit Query"| Query
     Query -->|"2. Dispatch to Handler"| QueryHandler
-    QueryHandler -->|"3. Execute SQL Query"| DataFusion
-    DataFusion -->|"4. Scan Materialized View (delta-rs)"| DeltaLake
-    DeltaLake -->|"5. Arrow RecordBatches"| DataFusion
-    DataFusion -->|"6. Query Result"| QueryHandler
+    QueryHandler -->|"3. Execute Parameterized SQL"| TiDbEngine
+    TiDbEngine -->|"4. Indexed SQL Lookup / JOIN"| TiDB
+    TiDB -->|"5. Typed Result Rows"| TiDbEngine
+    TiDbEngine -->|"6. Query Result"| QueryHandler
     QueryHandler -->|"7. Assemble View DTO"| View
     View -->|"8. Return View"| ClientUI
 ```
 
-#### How Query, Query Handler, Apache DataFusion, and Materialized View Work Together:
+#### How Query, Query Handler, `TiDbOrderQueryEngine`, and TiDB Work Together:
 
-| Component             | Concrete Implementation                                       | Role in CQRS / ES Query Model                                                                                                                                                           |
-| :-------------------- | :------------------------------------------------------------ | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Query**             | `GetOrderQuery`<br/>`ListOrdersQuery`                         | **Read Contract:** Side-effect-free request describing what state to retrieve without mutating any domain aggregate.                                                                    |
-| **Query Handler**     | `QueriesHandler`<br/>(`ferrous-api/src/handlers/queries.rs`)  | **Read Coordinator:** Translates incoming REST queries into parameterized SQL, invokes the embedded DataFusion query engine, and maps Arrow batches into typed View DTOs.               |
-| **Query Engine**      | **Apache DataFusion**<br/>(`ferrous-api/src/query_engine.rs`) | **In-Process SQL Engine:** Executes vectorized SQL queries (<3ms P95) directly against registered Delta Lake `TableProvider` views with zero external DB proxy overhead.                |
-| **Materialized View** | **Delta Lake** (`orders_current_state`, `orders_raw_events`)  | **Read-Optimized Store:** Pre-folded snapshots written by `Projection` via `delta-rs`, optimized for fast point lookups and filtered listings without replaying SierraDB event streams. |
-| **View (DTO)**        | `OrderDetailResponse`<br/>`OrderListResponse`                 | **Projected Output:** Immutable, client-facing representation shaped specifically for UI/API consumption.                                                                               |
+| Component             | Concrete Implementation                                               | Role in CQRS / ES Query Model                                                                                                                                                                     |
+| :-------------------- | :-------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Query**             | `GetOrderQuery`<br/>`ListOrdersQuery`                                 | **Read Contract:** Side-effect-free request describing what state to retrieve without mutating any domain aggregate.                                                                              |
+| **Query Handler**     | `QueriesHandler`<br/>(`ferrous-api/src/handlers/queries.rs`)          | **Read Coordinator:** Translates incoming REST / MCP queries into canonical `ferrous-cqrses` Query structs, invokes `OrderQueryEngine`, and renders typed View DTOs.                              |
+| **Query Engine**      | **`TiDbOrderQueryEngine`**<br/>(`ferrous-api/src/tidb_query_engine.rs`) | **Transactional SQL Engine:** Implements `OrderQueryEngine` over `sqlx` (`mysql` + `tls-rustls`) with indexed lookups, pagination, and `olist_order_items` hydration (`InMemoryOrderQueryEngine` for unit tests). |
+| **Materialized View** | **TiDB** (`orders_current_state`, 9 `olist_*` tables)                 | **Transactional Read Store:** ACID-updated by `order-projection` (`TiDbProjectionStore`) and `tidb-sink`, supporting primary-key point lookups and multi-table SQL JOINs without replaying SierraDB. |
+| **View (DTO)**        | `OrderDetails`<br/>`OrderListResponse`                                | **Projected Output:** Immutable, client-facing representation shaped specifically for UI/API/MCP consumption.                                                                                     |
 
 ---
 
@@ -213,10 +212,10 @@ $$\text{Axum SSE Stream} \xrightarrow{\text{EventSource / Fetch}} \textbf{RxJS O
 
 - **API Service (`ferrous-api`):** **Rust / Axum** driven by **Goa Design v3** declarative contracts, compiling OpenAPI v3 specs into strongly typed Rust server traits via `rust-axum` and synchronizing live browser state via native **Axum SSE** (`axum::response::sse::Sse`).
 - **LLM Orchestration:** **`rig` (`rig-core`)** for pure-Rust agent pipelines, prompt construction, native tool execution, and direct Hugging Face integration via `rig::providers::huggingface` (`huggingface::QWEN2_5`).
-- **Analytical Query Engine:** **Apache DataFusion** executing vectorized SQL scans in <3ms directly against Delta Lake Parquet tables, embedded in-process in `ferrous-api` and `ferrous-cqrses` for sub-millisecond historical analytics.
+- **Transactional HTAP Persistence (`TiDB`, AD-36):** **TiDB** (`pingcap/tidb`, MySQL wire protocol `:4000`, HTTP status `:10080`, single-node `--store=unistore` locally) stores all **9 Kaggle Olist tables**, `orders_current_state`, `orders_raw_events`, `hpc_benchmarks`, and `_iggy_sink_offsets` with primary keys, secondary indexes, and ACID `INSERT ... ON DUPLICATE KEY UPDATE` semantics. Queried by `ferrous-api` via `TiDbOrderQueryEngine` (`sqlx` pure-Rust `mysql` + `tls-rustls`).
 - **Transactional Event Store:** **SierraDB** (`sierradb`), pure-Rust RESP3 distributed event store providing sub-millisecond atomic append operations (`EAPPEND`), event stream scanning (`ESCAN`), and version checks (`ESVER`) with optimistic concurrency control for `ferrous-cqrses` aggregates.
-- **Message Broker & Lakehouse Sinks:** **Apache Iggy** for ultra-high throughput event and conversation telemetry streaming with built-in native **`delta_sink`** connector streaming directly to Delta Lake Parquet tables in `/data/delta/` (`orders_raw_events`, `orders_current_state`, `olist_orders`, `hpc_benchmarks`) with strict `schema = "json"` invariants.
-- **CQRS-ES Engine (`ferrous-cqrses`):** Pure-Rust Domain-Driven CQRS/ES engine built on the `cqrs-es` crate. Under Topology A, `ferrous-api` hosts the synchronous `CommandHandler` backed by SierraDB (`EventStore`) enforcing invariants ($20 courtesy credit cap, lifecycle states) before committing atomic event streams (`EAPPEND`), and dispatches committed domain state to Apache Iggy (`orders/consolidated`). The `Projection` (`order-projection`, `cg-order-projection`) consumes `orders/consolidated`, writes materialized snapshots to Delta Lake via `delta-rs`, and publishes callbacks to `orders/callback`, where `Callback Service` (`cg-order-callback`) runs the same `ESCAN` → Rehydrate Aggregate → Invariant Evaluation → `EAPPEND` pipeline against SierraDB. Meanwhile, `orders/intake` is used directly by `stream-replay-rs` to inject raw data into Delta Lake (`orders_raw_events`).
+- **Message Broker & Custom TiDB Sink (`tidb-sink`, AD-24, AD-36):** **Apache Iggy** for ultra-high throughput event and telemetry streaming paired with our custom pure-Rust **`tidb-sink`** daemon (`12 MB` `FROM scratch`, UID `10001`), transforming JSON payloads from `olist/*_stream`, `orders/consolidated`, `orders/intake`, and `benchmark/hpc_mqbench` into batched transactional TiDB UPSERTs with atomic offset checkpointing.
+- **CQRS-ES Engine (`ferrous-cqrses`):** Pure-Rust Domain-Driven CQRS/ES engine built on the `cqrs-es` crate. Under Topology A, `ferrous-api` hosts the synchronous `CommandHandler` backed by SierraDB (`EventStore`) enforcing invariants ($20 courtesy credit cap, lifecycle states) before committing atomic event streams (`EAPPEND`), and dispatches committed domain state to Apache Iggy (`orders/consolidated`). The `Projection` (`order-projection`, `cg-order-projection`) consumes `orders/consolidated`, commits materialized snapshots directly to TiDB `orders_current_state` via `TiDbProjectionStore`, and publishes callbacks to `orders/callback`, where `Callback Service` (`cg-order-callback`) runs the same `ESCAN` → Rehydrate Aggregate → Invariant Evaluation → `EAPPEND` pipeline against SierraDB.
 
 ### Direct `rig` + `DataFusion` Integration
 
@@ -263,8 +262,8 @@ impl Tool for LakehouseOrderQueryTool {
 ### 1. Olist Brazilian E-Commerce Dataset (Flagship for Release 1)
 
 - **Purpose:** Retail customer support, order fulfillment, shipping delay mitigation, and sentiment analysis.
-- **Schema:** Relational Parquet tables including `orders`, `order_items`, `customers`, `payments`, `reviews`, and `sellers`.
-- **Execution:** Queried in real-time by `rig` agents via `DataFusion`, with order events replayed live through `stream-replay-rs` into `Apache Iggy` $\rightarrow$ native `delta_sink` connector $\rightarrow$ `Delta Lake`.
+- **Schema:** Full 9-table relational SQL schema in TiDB (`config/tidb/schema.sql`): `olist_orders`, `olist_order_items`, `olist_order_payments`, `olist_order_reviews`, `olist_customers`, `olist_products`, `olist_sellers`, `olist_geolocation` (CEP-deduplicated), and `olist_category_translation`.
+- **Execution:** Replayed live through `stream-replay-rs` into **Apache Iggy** $\rightarrow$ custom pure-Rust **`tidb-sink`** $\rightarrow$ **TiDB**, and queried in real time by `ferrous-api` (`TiDbOrderQueryEngine`) and `rig` agents over `/mcp`.
 
 ### 2. Replay Profiles: Demo (10x) and Load (`--rate 25`)
 
@@ -294,7 +293,7 @@ While the Olist demo profile intentionally throttles to ~1 order/min for human U
 - **Monotonic Time Shifting**:
   $$\text{Timestamp}_{\text{emitted}} = \text{Timestamp}_{\text{start}} + \frac{(\text{Timestamp}_{\text{record}} - \text{Timestamp}_{\text{first}}) + \text{loop\_count} \times \Delta_{\text{dataset}}}{\text{speed}}$$
   Guarantees strictly increasing streaming event watermarks with zero late-data drops or backward clock regressions across infinite looping simulations.
-- **Entity ID Salting**: Appends loop iteration markers (`_L1`, `_L2`) to entity primary keys (`order_id`) when `--loop-id-salt` is enabled, eliminating primary key deduplication collisions in downstream Delta Lake tables (`orders_raw_events`, `orders_current_state`).
+- **Entity ID Salting**: Appends loop iteration markers (`_L1`, `_L2`) to entity primary keys (`order_id`) when `--loop-id-salt` is enabled, eliminating primary key collisions in downstream TiDB tables (`olist_orders`, `orders_current_state`, `orders_raw_events`).
 
 ### 4. MultiWOZ (Multi-Domain Wizard-of-Oz)
 
@@ -341,13 +340,13 @@ ferrous-cx/ (This Repository - Core Public Repository: demo config, runtime stac
 | **2** | **`ferrous-iam`**          | [`reidlai/ferrous-iam`](https://github.com/reidlai/ferrous-iam)                   | Identity & Access Management container engine (Kanidm pure-Rust IdP, OIDC/OAuth2). Platform personas (`seed-rbac.json`, `seed-m2m.json`) and TLS certificates are decoupled into and managed by `ferrous-cx`. | Pure-Rust Kanidm / Docker                  |
 | **3** | **`ferrous-vectordb`**     | [`reidlai/ferrous-vectordb`](https://github.com/reidlai/ferrous-vectordb)         | Qdrant vector database indexing enterprise SOPs & support transcripts                                                                                                                                         | Qdrant Vector DB / FastEmbed               |
 | **4** | **`ferrous-cqrses`**       | [`reidlai/ferrous-cqrses`](https://github.com/reidlai/ferrous-cqrses)             | Domain-Driven CQRS/ES Library (`cqrs-es`), Order Projection Daemon (`order-projection`), and Asynchronous Saga Process Manager Daemon (`order-saga`) with SierraDB EventStore                                 | Pure-Rust Library Crate & Daemons          |
-| **5** | **`ferrous-api`**          | [`reidlai/ferrous-api`](https://github.com/reidlai/ferrous-api)                   | Contract-First Axum API Service (Goa DSL, rust-axum, in-process DataFusion <3ms SQL, Axum SSE, Asynchronous Settlement Callback Service)                                                                      | Goa v3 / Axum / DataFusion                 |
+| **5** | **`ferrous-api`**          | [`reidlai/ferrous-api`](https://github.com/reidlai/ferrous-api)                   | Contract-First Axum API Service (Goa DSL, `rust-axum`, `TiDbOrderQueryEngine` SQL, Axum SSE, stateless `/mcp` server, Asynchronous Settlement Callback Service)                                              | Goa v3 / Axum / `sqlx` (TiDB)              |
 | **6** | **`ferrous-agent`**        | [`reidlai/ferrous-agent`](https://github.com/reidlai/ferrous-agent)               | Pure-Rust Multi-Provider AI Engine (`rig-core`), Context Sanitizer & In-Process Benchmarks                                                                                                                    | `rig-core` / Context Sanitizer             |
 | **7** | **`ferrous-frontend`**     | [`reidlai/ferrous-frontend`](https://github.com/reidlai/ferrous-frontend)         | Svelte 5 + shadcn-svelte 3-column UI workbench, including the read-only Replay Monitor                                                                                                                        | Svelte 5 / shadcn-svelte / RxJS / Tailwind |
 | **8** | **`ferrous-reverseproxy`** | [`reidlai/ferrous-reverseproxy`](https://github.com/reidlai/ferrous-reverseproxy) | Zentinel (Cloudflare Pingora) Edge Reverse Proxy, TLS 1.3 Termination & OWASP WAF                                                                                                                             | Pure-Rust Zentinel / Pingora / CRS         |
 
 > [!NOTE]
-> Following the streaming consolidation in Epic 16 and SierraDB deployment in Epic 17, `ferrous-streaming` and `iggy-kafka-bridge` were retired: Apache Iggy with native `delta_sink` connector, SierraDB (`sierradb`), and the `streaming-admin` administrative suite are orchestrated directly within `ferrous-cx`.
+> Following streaming consolidation (Epic 16), SierraDB deployment (Epic 17), and the **TiDB transactional storage pivot (Epic 23, AD-36)**, `ferrous-streaming`, `iggy-kafka-bridge`, and Delta Lake (`delta-sink` / `/data/delta`) were retired: Apache Iggy, single-node **TiDB** (`pingcap/tidb`), our custom pure-Rust **`tidb-sink`**, SierraDB (`sierradb`), and the `streaming-admin` suite are orchestrated directly within `ferrous-cx`.
 
 ---
 
@@ -419,17 +418,17 @@ docker compose up -d
 docker compose ps
 ```
 
-### 4. Provision Apache Iggy Topics, Delta Lake Storage, & IAM Personas
+### 4. Provision Apache Iggy Topics, TiDB Schema, & IAM Personas
 
-The automated Cargo provisioners idempotently initialize all streams, topics, consumer groups, Delta Lake tables, and IAM personas:
+The automated Cargo provisioners idempotently initialize all streams, topics, consumer groups, TiDB 9-table Olist + CQRS DDL, and IAM personas:
 
 ```bash
 # Cross-Platform Unified Administration Suite (Cargo)
-cargo run --bin streaming-admin -- all --dry-run   # Full conformance audit across Steps 2 through 6
-cargo run --bin streaming-admin -- all             # Live provisioning, Delta Lake storage init, & connector validation
+cargo run --bin streaming-admin -- provision-topics --url http://127.0.0.1:3000
+cargo run --bin streaming-admin -- init-tidb-schema --tidb-url mysql://root@127.0.0.1:4000/ferrouscx
 
 cargo run --bin setup-iam -- --dry-run             # IAM persona & M2M audit
-cargo run --bin setup-iam                         # Idempotent IAM setup
+cargo run --bin setup-iam                          # Idempotent IAM setup
 
 # Optional shell wrappers:
 # Linux/macOS:        ./scripts/setup-topics.sh && ./scripts/setup-iam.sh
@@ -559,21 +558,23 @@ docker compose ps        # wait until ferrous-iam, iggy-broker, sierradb, and ve
 | Apache Iggy HTTP       | `http://localhost:3000/ping`                              | Broker HTTP Management & Health                           |
 | Apache Iggy native TCP | `localhost:8090`                                          | High-Throughput Streaming & WAL                           |
 | SierraDB Event Store   | `localhost:9090`                                          | Pure-Rust RESP3 Event Store (`EAPPEND`, `ESCAN`, `ESVER`) |
+| TiDB Transactional DB  | `localhost:4000` (MySQL), `http://localhost:10080/status` | TiDB HTAP SQL (`olist_*`, `orders_current_state`, AD-36)  |
+| Custom TiDB Sink       | `http://localhost:8095/health`                            | Pure-Rust `FROM scratch` Iggy → TiDB Sink (`tidb-sink`)   |
 | Qdrant Vector DB       | `http://localhost:6333/readyz`                            | Vector DB for SOPs & Transcripts                          |
-| Ferrous API Gateway    | `http://localhost:8080/health`                            | Axum API + SSE + In-Process DataFusion                    |
+| Ferrous API Gateway    | `http://localhost:8080/health`                            | Axum API + SSE + `TiDbOrderQueryEngine` + `/mcp`          |
 | Frontend UI            | `http://localhost:5173/`                                  | Svelte 5 Operator Studio (read-only)                      |
 
-### 5. Provision Topics, Consumer Groups, Delta Lake Storage, & IAM Personas
+### 5. Provision Topics, TiDB Schema, & IAM Personas
 
-`ferrous-cx` owns the platform streaming administration and IAM persona configurations. Use the native cross-platform Cargo tools to audit and idempotently provision the entire platform:
+`ferrous-cx` owns the platform streaming administration, TiDB 9-table Olist DDL, and IAM persona configurations. Use the native cross-platform Cargo tools to audit and idempotently provision the entire platform:
 
 ```bash
 # Cross-Platform (Cargo)
-cargo run --bin streaming-admin -- all --dry-run   # Conformance audit across topics, groups, delta storage, & delta_sink
-cargo run --bin streaming-admin -- all             # Live stream, topic, consumer group, and Delta Lake initialization
+cargo run --bin streaming-admin -- provision-topics --url http://127.0.0.1:3000
+cargo run --bin streaming-admin -- init-tidb-schema --tidb-url mysql://root@127.0.0.1:4000/ferrouscx
 
 cargo run --bin setup-iam -- --dry-run             # IAM persona & M2M audit
-cargo run --bin setup-iam                         # Idempotent IAM setup
+cargo run --bin setup-iam                          # Idempotent IAM setup
 
 # Optional shell wrappers:
 # Linux/macOS:        ./scripts/setup-topics.sh && ./scripts/setup-iam.sh
@@ -608,5 +609,5 @@ curl http://localhost:8080/health         # API Service health
 ```bash
 docker compose down            # stop, keep data
 docker compose down -v         # also delete the named volumes
-# Persistent state lives in named volumes iggy_data, sierradb_data, and delta_data
+# Persistent state lives in named volumes iggy_data, sierradb_data, and tidb_data
 ```
