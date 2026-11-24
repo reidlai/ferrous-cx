@@ -1,5 +1,6 @@
 pub mod admin;
 pub mod benchmark_runner;
+pub mod tidb;
 
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};

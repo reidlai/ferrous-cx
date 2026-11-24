@@ -23,7 +23,6 @@ services:
       - ./config/streaming/iggy.toml:/etc/iggy/iggy.toml:ro
       - ./config/streaming/connectors:/etc/iggy/connectors:ro
       - iggy_data:/data/iggy
-      - delta_data:/data/delta
     environment:
       - IGGY_CONFIG_PATH=/etc/iggy/iggy.toml
       - IGGY_NODE_ADVERTISED_ADDRESS=localhost
@@ -53,13 +52,38 @@ services:
         limits:
           memory: 2G
 
-  # 0b. Native Apache Iggy -> Delta Lake 2PC Sink Connector Daemon (AD-24, AD-28b)
-  delta-sink:
+  # 0b. TiDB Single-Node Transactional HTAP Store (Story 23.1, AD-36)
+  tidb:
+    image: pingcap/tidb:latest
+    container_name: ferrous-tidb
+    restart: unless-stopped
+    command:
+      - "--store=unistore"
+      - "--path=/var/lib/tidb"
+      - "--host=0.0.0.0"
+    ports:
+      - "${PORT_TIDB_SQL:-4000}:4000"
+      - "${PORT_TIDB_STATUS:-10080}:10080"
+    volumes:
+      - tidb_data:/var/lib/tidb
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:10080/status >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # 0c. Custom Pure-Rust Apache Iggy -> TiDB Transactional Sink Daemon (Story 23.2, AD-24, AD-36)
+  tidb-sink:
     build:
       context: .
-      dockerfile: docker/Dockerfile.delta_sink
-    image: ferrous-delta-sink:latest
-    container_name: ferrous-delta-sink
+      dockerfile: docker/Dockerfile.tidb_sink
+    image: ferrous-tidb-sink:latest
+    container_name: ferrous-tidb-sink
     user: "10001:10001"
     restart: unless-stopped
     read_only: true
@@ -70,22 +94,23 @@ services:
     tmpfs:
       - /tmp:noexec,nosuid,nodev,size=64M,mode=1777
     ports:
-      - "${PORT_DELTA_SINK:-8095}:8095"
+      - "${PORT_TIDB_SINK:-8095}:8095"
     volumes:
-      - delta_data:/data/delta
       - ./config/streaming/connectors:/etc/iggy/connectors:ro
     environment:
       - IGGY_HTTP_URL=http://iggy-broker:3000
       - IGGY_USERNAME=${IGGY_USERNAME:-iggy}
       - IGGY_PASSWORD=${IGGY_PASSWORD:-iggy}
-      - DELTA_DATA_DIR=/data/delta
-      - DELTA_SINK_CONFIG=/etc/iggy/connectors/delta_sink.toml
-      - DELTA_SINK_PORT=8095
+      - TIDB_URL=${TIDB_URL:-mysql://root@tidb:4000/ferrouscx}
+      - TIDB_SINK_CONFIG=/etc/iggy/connectors/tidb_sink.toml
+      - TIDB_SINK_PORT=8095
     depends_on:
       iggy-broker:
         condition: service_healthy
+      tidb:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "/delta-sink", "--healthcheck"]
+      test: ["CMD", "/tidb-sink", "--healthcheck"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -222,6 +247,7 @@ services:
       - TOPIC_ORDERS_CALLBACK=callback
       - CONSUMER_GROUP=cg-order-projection
       - SIERRADB_URL=${SIERRADB_URL:-redis://sierradb:9090}
+      - TIDB_URL=${TIDB_URL:-mysql://root@tidb:4000/ferrouscx}
     deploy:
       resources:
         limits:
@@ -230,6 +256,8 @@ services:
       iggy-broker:
         condition: service_healthy
       sierradb:
+        condition: service_healthy
+      tidb:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "/order_projection", "--healthcheck"]
@@ -304,19 +332,16 @@ services:
       - /tmp:noexec,nosuid,nodev,size=64M,mode=1777
     ports:
       - "${PORT_API:-8080}:8080"
-    volumes:
-      - delta_data:/data/delta:ro
     environment:
       - PORT=8080
       - IGGY_SERVER_ADDRESS=${IGGY_SERVER_ADDRESS:-iggy-broker:8090}
       - SIERRADB_URL=${SIERRADB_URL:-redis://sierradb:9090}
+      - TIDB_URL=${TIDB_URL:-mysql://root@tidb:4000/ferrouscx}
       - KANIDM_JWT_SECRET=${KANIDM_JWT_SECRET:-development_kanidm_jwt_secret_32_bytes_minimum!}
       - KANIDM_ISSUER=${KANIDM_ISSUER:-https://iam.ferrouscx.local/oauth2/openid/svc_ferrous_api}
       - CARLOS_SUPPORT_PASSWORD=${CARLOS_SUPPORT_PASSWORD:-ferrous-demo-2026}
       - OPS_LEAD_PASSWORD=${OPS_LEAD_PASSWORD:-ferrous-demo-2026}
       - ADMIN_SEC_PASSWORD=${ADMIN_SEC_PASSWORD:-ferrous-demo-2026}
-      - DELTA_DATA_DIR=/data/delta
-      - DELTA_ORDERS_PATH=/data/delta/orders_current_state
       - RUST_LOG=info
       - OTEL_SDK_DISABLED=${OTEL_SDK_DISABLED:-true}
       - OTEL_TRACES_EXPORTER=${OTEL_TRACES_EXPORTER:-console}
@@ -325,6 +350,8 @@ services:
       iggy-broker:
         condition: service_healthy
       sierradb:
+        condition: service_healthy
+      tidb:
         condition: service_healthy
       ferrous-iam:
         condition: service_healthy
@@ -511,8 +538,8 @@ volumes:
     name: ferrous_qdrant_storage
   iggy_data:
     name: ferrous_iggy_data
-  delta_data:
-    name: ferrous_delta_data
+  tidb_data:
+    name: ferrous_tidb_data
   sierradb_data:
     name: ferrous_sierradb_data
 

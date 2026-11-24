@@ -6,6 +6,9 @@ use ferrous_cx::admin::{
     run_all, run_init_delta_storage, run_load_olist_dimensions, run_provision_consumer_groups,
     run_provision_topics, run_validate_connectors, run_verify_broker, DEFAULT_IGGY_URL,
 };
+use ferrous_cx::tidb::{
+    connect_and_init_tidb, load_olist_dimensions_to_tidb, DEFAULT_TIDB_URL,
+};
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -120,6 +123,32 @@ pub enum Command {
         dry_run: bool,
     },
 
+    /// Initialize canonical 9-table Olist + CQRS TiDB SQL schema (Story 23.1, AD-36)
+    InitTidbSchema {
+        /// TiDB MySQL-protocol connection URL
+        #[arg(long, env = "TIDB_URL", default_value = DEFAULT_TIDB_URL)]
+        tidb_url: String,
+
+        /// Run in dry-run mode without connecting to TiDB
+        #[arg(short, long)]
+        dry_run: bool,
+    },
+
+    /// Batch-UPSERT the 5 static Kaggle Olist dimension CSVs directly into TiDB (Story 23.1, AD-36)
+    LoadOlistTidb {
+        /// Directory containing Kaggle Olist CSV files
+        #[arg(long, default_value = "docs/datasets/olist")]
+        input_dir: PathBuf,
+
+        /// TiDB MySQL-protocol connection URL
+        #[arg(long, env = "TIDB_URL", default_value = DEFAULT_TIDB_URL)]
+        tidb_url: String,
+
+        /// Run in dry-run mode without connecting to TiDB
+        #[arg(short, long)]
+        dry_run: bool,
+    },
+
     /// Execute the full streaming setup sequence in order (Steps 2 -> 3 -> 4 -> 5 -> 6)
     All {
         /// Apache Iggy HTTP URL
@@ -196,6 +225,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             dry_run,
         } => {
             run_load_olist_dimensions(&input_dir, &delta_dir, dry_run).await?;
+        }
+        Command::InitTidbSchema { tidb_url, dry_run } => {
+            if dry_run {
+                println!("[DRY-RUN] Would apply canonical 9-table Olist + CQRS DDL to {tidb_url}");
+            } else {
+                let _pool = connect_and_init_tidb(&tidb_url, 4).await?;
+                println!("[init-tidb-schema] Applied canonical 9-table Olist + CQRS schema to TiDB");
+            }
+        }
+        Command::LoadOlistTidb {
+            input_dir,
+            tidb_url,
+            dry_run,
+        } => {
+            if dry_run {
+                println!(
+                    "[DRY-RUN] Would batch-UPSERT 5 Olist dimension CSVs from {} into {tidb_url}",
+                    input_dir.display()
+                );
+            } else {
+                let pool = connect_and_init_tidb(&tidb_url, 4).await?;
+                let loaded = load_olist_dimensions_to_tidb(&pool, &input_dir).await?;
+                for (tbl, cnt) in loaded {
+                    println!("[load-olist-tidb] Upserted {cnt} rows into {tbl}");
+                }
+            }
         }
         Command::All {
             iggy_url,

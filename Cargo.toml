@@ -29,12 +29,18 @@ path = "src/bin/streaming_admin.rs"
 name = "delta-sink"
 path = "src/bin/delta_sink.rs"
 
+[[bin]]
+name = "tidb-sink"
+path = "src/bin/tidb_sink.rs"
+
 [dependencies]
 base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5", features = ["derive", "env"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
+sqlx = { version = "0.8", default-features = false, features = ["mysql", "runtime-tokio", "tls-rustls", "chrono", "json"] }
 toml = "0.8"
 uuid = { version = "1.10", features = ["v4", "fast-rng"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
