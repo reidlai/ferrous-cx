@@ -1,0 +1,18 @@
+# ==============================================================================
+# FerrousCX Olist Order Payments Replay Profile (Story 22.1, AD-35)
+# Targets native Apache Iggy HTTP API on 127.0.0.1:3000 (olist/order_payments_stream)
+# ==============================================================================
+
+[dataset]
+input_path = "docs/datasets/olist/olist_order_payments_dataset.csv"
+format = "csv"
+partition_key = "order_id"
+
+[replay]
+rate = 500
+loop = false
+
+[sink]
+default_type = "iggy"
+default_url = "http://127.0.0.1:3000"
+destination = "olist/order_payments_stream"
