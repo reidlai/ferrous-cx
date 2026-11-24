@@ -438,7 +438,7 @@ cargo run --bin setup-iam                         # Idempotent IAM setup
 
 ### 5. Replay Olist Traffic
 
-Produce real-world e-commerce traffic through native Apache Iggy stream ingestion (`http://127.0.0.1:3000` → `orders/intake`):
+Download the public Kaggle [Brazilian E-Commerce Public Dataset by Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce) (`olist_orders_dataset.csv`) into `docs/datasets/olist/olist_orders_dataset.csv` (or use the bundled sample), then replay it directly into Apache Iggy (`http://127.0.0.1:3000` → `olist/orders_stream` → native `delta-sink` → `/data/delta/olist_orders`, per **AD-34**):
 
 ```bash
 # Option A: Run directly via Cargo
