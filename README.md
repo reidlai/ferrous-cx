@@ -436,14 +436,22 @@ cargo run --bin setup-iam                         # Idempotent IAM setup
 # Windows PowerShell: .\scripts\setup-topics.ps1; .\scripts\setup-iam.ps1
 ```
 
-### 5. Replay Olist Traffic
+### 5. Replay & Load the Full 9-Table Olist Dataset (AD-34, AD-35)
 
-Download the public Kaggle [Brazilian E-Commerce Public Dataset by Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce) (`olist_orders_dataset.csv`) into `docs/datasets/olist/olist_orders_dataset.csv` (or use the bundled sample), then replay it directly into Apache Iggy (`http://127.0.0.1:3000` → `olist/orders_stream` → native `delta-sink` → `/data/delta/olist_orders`, per **AD-34**):
+Download the public Kaggle [Brazilian E-Commerce Public Dataset by Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce) (all 9 CSVs) into `docs/datasets/olist/` (or use the bundled `olist_orders_dataset.csv` sample):
 
 ```bash
-# Option A: Run directly via Cargo
-# From a recursive standalone clone:
+# 1. Batch-load the 5 static reference dimensions into Delta Lake (customers, products, sellers, deduplicated geolocation, category translations)
+cargo run --release --bin streaming-admin -- load-olist-dimensions \
+  --input-dir docs/datasets/olist --delta-dir data/delta
+
+# 2. Stream the 4 transactional fact tables into Apache Iggy -> native delta-sink -> /data/delta/olist_*
+# Orders (10x demo pace -> olist/orders_stream):
 cargo run --release --manifest-path ./stream-replay-rs/Cargo.toml -- --config profiles/olist-demo.toml
+# Optional: stream items, payments, and reviews once downloaded into docs/datasets/olist/:
+cargo run --release --manifest-path ./stream-replay-rs/Cargo.toml -- --config profiles/olist-items.toml
+cargo run --release --manifest-path ./stream-replay-rs/Cargo.toml -- --config profiles/olist-payments.toml
+cargo run --release --manifest-path ./stream-replay-rs/Cargo.toml -- --config profiles/olist-reviews.toml
 # Or from a sibling monorepo workspace:
 cargo run --release --manifest-path ../stream-replay-rs/Cargo.toml -- --config profiles/olist-demo.toml
 

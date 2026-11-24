@@ -1,0 +1,21 @@
+# ==============================================================================
+# FerrousCX Olist Order Items Replay Profile (Story 22.1, AD-35)
+# Targets native Apache Iggy HTTP API on 127.0.0.1:3000 (olist/order_items_stream)
+# ==============================================================================
+
+[dataset]
+input_path = "docs/datasets/olist/olist_order_items_dataset.csv"
+format = "csv"
+timestamp_column = "shipping_limit_date"
+timestamp_unit = "rfc3339"
+partition_key = "order_id"
+
+[replay]
+speed = 100.0
+event_time = "compress"
+loop = false
+
+[sink]
+default_type = "iggy"
+default_url = "http://127.0.0.1:3000"
+destination = "olist/order_items_stream"

@@ -44,7 +44,37 @@ table_uri = "/data/delta/olist_orders"
 batch_size = 1000
 batch_timeout_ms = 1000
 
-# 4. HPC-MQBench Benchmark Sink: benchmark/hpc_mqbench -> /data/delta/hpc_benchmarks
+# 4. Olist Order Items Sink: olist/order_items_stream -> /data/delta/olist_order_items (AD-35)
+[[sinks]]
+name = "olist_order_items_sink"
+stream = "olist"
+topic = "order_items_stream"
+schema = "json"
+table_uri = "/data/delta/olist_order_items"
+batch_size = 1000
+batch_timeout_ms = 1000
+
+# 5. Olist Order Payments Sink: olist/order_payments_stream -> /data/delta/olist_order_payments (AD-35)
+[[sinks]]
+name = "olist_order_payments_sink"
+stream = "olist"
+topic = "order_payments_stream"
+schema = "json"
+table_uri = "/data/delta/olist_order_payments"
+batch_size = 1000
+batch_timeout_ms = 1000
+
+# 6. Olist Order Reviews Sink: olist/order_reviews_stream -> /data/delta/olist_order_reviews (AD-35)
+[[sinks]]
+name = "olist_order_reviews_sink"
+stream = "olist"
+topic = "order_reviews_stream"
+schema = "json"
+table_uri = "/data/delta/olist_order_reviews"
+batch_size = 1000
+batch_timeout_ms = 1000
+
+# 7. HPC-MQBench Benchmark Sink: benchmark/hpc_mqbench -> /data/delta/hpc_benchmarks
 [[sinks]]
 name = "hpc_benchmarks_sink"
 stream = "benchmark"

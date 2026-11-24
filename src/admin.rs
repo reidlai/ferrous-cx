@@ -48,12 +48,32 @@ pub const BENCHMARK_TOPICS: &[TopicSpec] = &[TopicSpec {
     description: "HPC-MQBench qualification-first synthetic benchmark stream (immediate fsync)",
 }];
 
-pub const OLIST_TOPICS: &[TopicSpec] = &[TopicSpec {
-    id: 1,
-    name: "orders_stream",
-    partitions: 4,
-    description: "Olist Brazilian E-Commerce historical order replay stream (immediate fsync)",
-}];
+pub const OLIST_TOPICS: &[TopicSpec] = &[
+    TopicSpec {
+        id: 1,
+        name: "orders_stream",
+        partitions: 4,
+        description: "Olist Brazilian E-Commerce historical order replay stream (immediate fsync)",
+    },
+    TopicSpec {
+        id: 2,
+        name: "order_items_stream",
+        partitions: 4,
+        description: "Olist order line items stream (price, freight, product, seller) (AD-35)",
+    },
+    TopicSpec {
+        id: 3,
+        name: "order_payments_stream",
+        partitions: 4,
+        description: "Olist order payment legs stream (payment_type, installments, value) (AD-35)",
+    },
+    TopicSpec {
+        id: 4,
+        name: "order_reviews_stream",
+        partitions: 4,
+        description: "Olist customer order reviews stream (score, comments, timestamps) (AD-35)",
+    },
+];
 
 /// Consumer group specification
 #[derive(Debug, Clone)]
@@ -199,6 +219,106 @@ pub const TABLES: &[TableInitSpec] = &[
             ("order_delivered_carrier_date", "timestamp", true),
             ("order_delivered_customer_date", "timestamp", true),
             ("order_estimated_delivery_date", "timestamp", false),
+        ],
+    },
+    TableInitSpec {
+        name: "olist_order_items_ingestion",
+        delta_table_name: "olist_order_items",
+        consumer_group: "cg-arroyo-olist-items",
+        schema_fields: &[
+            ("order_id", "string", false),
+            ("order_item_id", "integer", false),
+            ("product_id", "string", false),
+            ("seller_id", "string", false),
+            ("shipping_limit_date", "timestamp", false),
+            ("price", "double", false),
+            ("freight_value", "double", false),
+        ],
+    },
+    TableInitSpec {
+        name: "olist_order_payments_ingestion",
+        delta_table_name: "olist_order_payments",
+        consumer_group: "cg-arroyo-olist-payments",
+        schema_fields: &[
+            ("order_id", "string", false),
+            ("payment_sequential", "integer", false),
+            ("payment_type", "string", false),
+            ("payment_installments", "integer", false),
+            ("payment_value", "double", false),
+        ],
+    },
+    TableInitSpec {
+        name: "olist_order_reviews_ingestion",
+        delta_table_name: "olist_order_reviews",
+        consumer_group: "cg-arroyo-olist-reviews",
+        schema_fields: &[
+            ("review_id", "string", false),
+            ("order_id", "string", false),
+            ("review_score", "integer", false),
+            ("review_comment_title", "string", true),
+            ("review_comment_message", "string", true),
+            ("review_creation_date", "timestamp", false),
+            ("review_answer_timestamp", "timestamp", false),
+        ],
+    },
+    TableInitSpec {
+        name: "olist_customers_dimension",
+        delta_table_name: "olist_customers",
+        consumer_group: "batch-dimension-loader",
+        schema_fields: &[
+            ("customer_id", "string", false),
+            ("customer_unique_id", "string", false),
+            ("customer_zip_code_prefix", "string", false),
+            ("customer_city", "string", false),
+            ("customer_state", "string", false),
+        ],
+    },
+    TableInitSpec {
+        name: "olist_products_dimension",
+        delta_table_name: "olist_products",
+        consumer_group: "batch-dimension-loader",
+        schema_fields: &[
+            ("product_id", "string", false),
+            ("product_category_name", "string", true),
+            ("product_name_lenght", "integer", true),
+            ("product_description_lenght", "integer", true),
+            ("product_photos_qty", "integer", true),
+            ("product_weight_g", "double", true),
+            ("product_length_cm", "double", true),
+            ("product_height_cm", "double", true),
+            ("product_width_cm", "double", true),
+        ],
+    },
+    TableInitSpec {
+        name: "olist_sellers_dimension",
+        delta_table_name: "olist_sellers",
+        consumer_group: "batch-dimension-loader",
+        schema_fields: &[
+            ("seller_id", "string", false),
+            ("seller_zip_code_prefix", "string", false),
+            ("seller_city", "string", false),
+            ("seller_state", "string", false),
+        ],
+    },
+    TableInitSpec {
+        name: "olist_geolocation_dimension",
+        delta_table_name: "olist_geolocation",
+        consumer_group: "batch-dimension-loader",
+        schema_fields: &[
+            ("geolocation_zip_code_prefix", "string", false),
+            ("geolocation_lat", "double", false),
+            ("geolocation_lng", "double", false),
+            ("geolocation_city", "string", false),
+            ("geolocation_state", "string", false),
+        ],
+    },
+    TableInitSpec {
+        name: "olist_category_translation_dimension",
+        delta_table_name: "olist_category_translation",
+        consumer_group: "batch-dimension-loader",
+        schema_fields: &[
+            ("product_category_name", "string", false),
+            ("product_category_name_english", "string", false),
         ],
     },
 ];
@@ -1083,4 +1203,278 @@ mod tests {
         assert_eq!(OLIST_TOPICS.len(), 1);
         assert_eq!(CONSUMER_GROUPS.len(), 7);
     }
+}
+
+// ==============================================================================
+// Story 22.2 (AD-35): Pure-Rust Batch Olist Dimension Loader
+// ==============================================================================
+
+/// Summary report returned by [`load_olist_dimensions`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OlistDimensionLoadReport {
+    pub tables_loaded: Vec<(String, usize)>,
+    pub tables_skipped: Vec<String>,
+}
+
+/// Parses a single RFC-4180 CSV line supporting double-quoted fields and escaped `""`.
+fn parse_csv_line(line: &str) -> Vec<String> {
+    let mut fields = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => {
+                if in_quotes && chars.peek() == Some(&'"') {
+                    current.push('"');
+                    chars.next();
+                } else {
+                    in_quotes = !in_quotes;
+                }
+            }
+            ',' if !in_quotes => {
+                fields.push(current.trim().to_string());
+                current.clear();
+            }
+            '\r' => {}
+            _ => current.push(c),
+        }
+    }
+    fields.push(current.trim().to_string());
+    fields
+}
+
+fn next_delta_version(table_dir: &Path) -> u64 {
+    let mut max_ver = 0u64;
+    if let Ok(entries) = std::fs::read_dir(table_dir.join("_delta_log")) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.len() == 25 && name.ends_with(".json") {
+                if let Ok(v) = name[..20].parse::<u64>() {
+                    max_ver = max_ver.max(v);
+                }
+            }
+        }
+    }
+    max_ver + 1
+}
+
+fn commit_ndjson_batch(
+    table_dir: &Path,
+    records: &[serde_json::Value],
+    source_name: &str,
+) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+    std::fs::create_dir_all(table_dir.join("_delta_log"))?;
+    let version = next_delta_version(table_dir);
+    let part_name = format!("part-{version:020}.ndjson");
+    let part_path = table_dir.join(&part_name);
+
+    let mut body = String::new();
+    for rec in records {
+        body.push_str(&serde_json::to_string(rec)?);
+        body.push('\n');
+    }
+    std::fs::write(&part_path, body.as_bytes())?;
+
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+
+    let add_action = serde_json::json!({
+        "add": {
+            "path": part_name,
+            "partitionValues": {},
+            "size": body.len(),
+            "modificationTime": now_ms,
+            "dataChange": true,
+            "stats": serde_json::json!({ "numRecords": records.len() }).to_string()
+        }
+    });
+    let commit_info = serde_json::json!({
+        "commitInfo": {
+            "timestamp": now_ms,
+            "operation": "WRITE",
+            "operationParameters": {
+                "mode": "Overwrite",
+                "source": source_name
+            },
+            "numRecords": records.len()
+        }
+    });
+    let log_path = table_dir
+        .join("_delta_log")
+        .join(format!("{version:020}.json"));
+    std::fs::write(&log_path, format!("{add_action}\n{commit_info}\n"))?;
+    Ok(version)
+}
+
+/// Batch-loads the 5 static Kaggle Olist dimension CSVs into Delta Lake tables (AD-35):
+/// - `olist_customers_dataset.csv` -> `olist_customers`
+/// - `olist_products_dataset.csv` -> `olist_products` (preserving `product_name_lenght`/`product_description_lenght`)
+/// - `olist_sellers_dataset.csv` -> `olist_sellers`
+/// - `olist_geolocation_dataset.csv` -> `olist_geolocation` (deduplicated & averaged per CEP prefix)
+/// - `product_category_name_translation.csv` -> `olist_category_translation`
+pub fn load_olist_dimensions(
+    input_dir: &Path,
+    delta_dir: &Path,
+) -> Result<OlistDimensionLoadReport, Box<dyn std::error::Error + Send + Sync>> {
+    init_delta_storage(delta_dir)?;
+    let mut report = OlistDimensionLoadReport::default();
+
+    let simple_dims: &[(&str, &str)] = &[
+        ("olist_customers_dataset.csv", "olist_customers"),
+        ("olist_products_dataset.csv", "olist_products"),
+        ("olist_sellers_dataset.csv", "olist_sellers"),
+        (
+            "product_category_name_translation.csv",
+            "olist_category_translation",
+        ),
+    ];
+
+    for (csv_file, table_name) in simple_dims {
+        let csv_path = input_dir.join(csv_file);
+        if !csv_path.exists() {
+            report.tables_skipped.push((*table_name).to_string());
+            continue;
+        }
+        let spec = TABLES
+            .iter()
+            .find(|t| t.delta_table_name == *table_name)
+            .ok_or_else(|| format!("Missing TableInitSpec for {table_name}"))?;
+
+        let text = std::fs::read_to_string(&csv_path)?;
+        let mut lines = text.lines();
+        let header = lines
+            .next()
+            .map(parse_csv_line)
+            .ok_or_else(|| format!("Empty CSV file: {}", csv_path.display()))?;
+
+        let mut rows = Vec::new();
+        for line in lines {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let cols = parse_csv_line(line);
+            let mut map = serde_json::Map::new();
+            for (idx, col_name) in header.iter().enumerate() {
+                let raw = cols.get(idx).map(|s| s.as_str()).unwrap_or("");
+                let field_type = spec
+                    .schema_fields
+                    .iter()
+                    .find(|(n, _, _)| n == col_name)
+                    .map(|(_, t, _)| *t)
+                    .unwrap_or("string");
+                let val = if raw.is_empty() {
+                    serde_json::Value::Null
+                } else {
+                    match field_type {
+                        "integer" | "long" => raw
+                            .parse::<i64>()
+                            .or_else(|_| raw.parse::<f64>().map(|f| f as i64))
+                            .map(serde_json::Value::from)
+                            .unwrap_or(serde_json::Value::Null),
+                        "double" => raw
+                            .parse::<f64>()
+                            .ok()
+                            .and_then(serde_json::Number::from_f64)
+                            .map(serde_json::Value::Number)
+                            .unwrap_or(serde_json::Value::Null),
+                        _ => serde_json::Value::String(raw.to_string()),
+                    }
+                };
+                map.insert(col_name.clone(), val);
+            }
+            rows.push(serde_json::Value::Object(map));
+        }
+
+        commit_ndjson_batch(&delta_dir.join(table_name), &rows, csv_file)?;
+        report
+            .tables_loaded
+            .push(((*table_name).to_string(), rows.len()));
+    }
+
+    // 5. Geolocation: deduplicate & average lat/lng per geolocation_zip_code_prefix (AD-35)
+    let geo_csv = input_dir.join("olist_geolocation_dataset.csv");
+    if geo_csv.exists() {
+        let text = std::fs::read_to_string(&geo_csv)?;
+        let mut lines = text.lines();
+        let _header = lines.next();
+        let mut grouped: std::collections::BTreeMap<String, (f64, f64, usize, String, String)> =
+            std::collections::BTreeMap::new();
+
+        for line in lines {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let cols = parse_csv_line(line);
+            if cols.len() < 5 {
+                continue;
+            }
+            let zip = cols[0].clone();
+            let lat = cols[1].parse::<f64>().unwrap_or(0.0);
+            let lng = cols[2].parse::<f64>().unwrap_or(0.0);
+            let city = cols[3].clone();
+            let state = cols[4].clone();
+
+            grouped
+                .entry(zip)
+                .and_modify(|(sum_lat, sum_lng, cnt, _, _)| {
+                    *sum_lat += lat;
+                    *sum_lng += lng;
+                    *cnt += 1;
+                })
+                .or_insert((lat, lng, 1, city, state));
+        }
+
+        let geo_rows: Vec<serde_json::Value> = grouped
+            .into_iter()
+            .map(|(zip, (sum_lat, sum_lng, cnt, city, state))| {
+                serde_json::json!({
+                    "geolocation_zip_code_prefix": zip,
+                    "geolocation_lat": sum_lat / (cnt as f64),
+                    "geolocation_lng": sum_lng / (cnt as f64),
+                    "geolocation_city": city,
+                    "geolocation_state": state,
+                })
+            })
+            .collect();
+
+        commit_ndjson_batch(
+            &delta_dir.join("olist_geolocation"),
+            &geo_rows,
+            "olist_geolocation_dataset.csv",
+        )?;
+        report
+            .tables_loaded
+            .push(("olist_geolocation".to_string(), geo_rows.len()));
+    } else {
+        report.tables_skipped.push("olist_geolocation".to_string());
+    }
+
+    Ok(report)
+}
+
+/// CLI wrapper for `streaming-admin load-olist-dimensions`.
+pub async fn run_load_olist_dimensions(
+    input_dir: &Path,
+    delta_dir: &Path,
+    dry_run: bool,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if dry_run {
+        println!(
+            "[DRY-RUN] Would batch-load 5 static Olist dimension CSVs from {} into {}",
+            input_dir.display(),
+            delta_dir.display()
+        );
+        return Ok(());
+    }
+    let report = load_olist_dimensions(input_dir, delta_dir)?;
+    for (table, count) in &report.tables_loaded {
+        println!("[load-olist-dimensions] Committed {count} rows to {table}");
+    }
+    for skipped in &report.tables_skipped {
+        println!("[load-olist-dimensions] Skipped {skipped} (CSV not found in input dir)");
+    }
+    Ok(())
 }

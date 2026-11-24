@@ -51,6 +51,36 @@ topics:
       consume: [cg-arroyo-olist]
       produce: true
 
+  - stream: olist
+    topic: order_items_stream
+    kafka_name: olist.order_items_stream
+    partitions: 4
+    retention: none
+    durability: persisted
+    kafka:
+      consume: [cg-arroyo-olist-items]
+      produce: true
+
+  - stream: olist
+    topic: order_payments_stream
+    kafka_name: olist.order_payments_stream
+    partitions: 4
+    retention: none
+    durability: persisted
+    kafka:
+      consume: [cg-arroyo-olist-payments]
+      produce: true
+
+  - stream: olist
+    topic: order_reviews_stream
+    kafka_name: olist.order_reviews_stream
+    partitions: 4
+    retention: none
+    durability: persisted
+    kafka:
+      consume: [cg-arroyo-olist-reviews]
+      produce: true
+
   - stream: benchmark
     topic: hpc_mqbench
     kafka_name: benchmark.hpc_mqbench

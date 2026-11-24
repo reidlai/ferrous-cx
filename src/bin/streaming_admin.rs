@@ -3,8 +3,8 @@
 
 use clap::{Parser, Subcommand};
 use ferrous_cx::admin::{
-    run_all, run_init_delta_storage, run_provision_consumer_groups, run_provision_topics,
-    run_validate_connectors, run_verify_broker, DEFAULT_IGGY_URL,
+    run_all, run_init_delta_storage, run_load_olist_dimensions, run_provision_consumer_groups,
+    run_provision_topics, run_validate_connectors, run_verify_broker, DEFAULT_IGGY_URL,
 };
 use std::path::PathBuf;
 
@@ -105,6 +105,21 @@ pub enum Command {
         dry_run: bool,
     },
 
+    /// Batch-load the 5 static Kaggle Olist dimension CSVs into Delta Lake (Story 22.2, AD-35)
+    LoadOlistDimensions {
+        /// Directory containing Kaggle Olist CSV files
+        #[arg(long, default_value = "docs/datasets/olist")]
+        input_dir: PathBuf,
+
+        /// Path to base Delta Lake storage directory
+        #[arg(long, default_value = "data/delta")]
+        delta_dir: PathBuf,
+
+        /// Run in dry-run mode without mutating disk
+        #[arg(short, long)]
+        dry_run: bool,
+    },
+
     /// Execute the full streaming setup sequence in order (Steps 2 -> 3 -> 4 -> 5 -> 6)
     All {
         /// Apache Iggy HTTP URL
@@ -174,6 +189,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             dry_run,
         } => {
             run_validate_connectors(&config, Some(&delta_dir), dry_run).await?;
+        }
+        Command::LoadOlistDimensions {
+            input_dir,
+            delta_dir,
+            dry_run,
+        } => {
+            run_load_olist_dimensions(&input_dir, &delta_dir, dry_run).await?;
         }
         Command::All {
             iggy_url,

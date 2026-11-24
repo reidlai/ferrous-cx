@@ -23,7 +23,7 @@ fn test_delta_sink_config_file_parses_cleanly() {
     assert_eq!(parsed.connector.plugin, "delta_sink");
     assert!(parsed.connector.enabled);
 
-    assert_eq!(parsed.sinks.len(), 4);
+    assert_eq!(parsed.sinks.len(), 7);
 
     // 1. orders_raw_events
     let raw_sink = parsed.sinks.iter().find(|s| s.name == "orders_raw_events_sink").expect("raw sink");
@@ -139,7 +139,7 @@ fn test_delta_sink_pre_creation_lifecycle_with_init_delta_storage() {
 
     let parsed = parse_and_validate_connector_config(&content, Some(&delta_dir))
         .expect("Connector validation must succeed against pre-created tables");
-    assert_eq!(parsed.sinks.len(), 4);
+    assert_eq!(parsed.sinks.len(), 7);
 }
 
 #[test]

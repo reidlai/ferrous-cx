@@ -1,0 +1,24 @@
+# ==============================================================================
+# FerrousCX Olist Order Reviews Replay Profile (Story 22.1, AD-35)
+# Targets native Apache Iggy HTTP API on 127.0.0.1:3000 (olist/order_reviews_stream)
+# ==============================================================================
+
+[dataset]
+input_path = "docs/datasets/olist/olist_order_reviews_dataset.csv"
+format = "csv"
+timestamp_column = "review_creation_date"
+timestamp_unit = "rfc3339"
+shift_columns = [
+    "review_answer_timestamp"
+]
+partition_key = "order_id"
+
+[replay]
+speed = 100.0
+event_time = "compress"
+loop = false
+
+[sink]
+default_type = "iggy"
+default_url = "http://127.0.0.1:3000"
+destination = "olist/order_reviews_stream"
