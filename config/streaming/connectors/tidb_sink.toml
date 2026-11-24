@@ -1,0 +1,86 @@
+# ==============================================================================
+# Custom Pure-Rust Apache Iggy -> TiDB Transactional Sink Configuration (AD-36)
+# Transforms JSON payloads from Apache Iggy into TiDB ACID UPSERTs across all
+# 4 streamed Kaggle Olist fact tables + CQRS orders_current_state + benchmarks.
+# ==============================================================================
+
+[connector]
+name = "tidb_sink"
+type = "sink"
+plugin = "tidb_sink"
+enabled = true
+
+[iggy]
+server_address = "127.0.0.1:8090"
+username = "iggy"
+password = "iggy"
+
+# 1. Orders Raw Events -> TiDB orders_raw_events
+[[sinks]]
+name = "orders_raw_events_sink"
+stream = "orders"
+topic = "intake"
+schema = "json"
+table = "orders_raw_events"
+batch_size = 500
+batch_timeout_ms = 500
+
+# 2. Orders Current State -> TiDB orders_current_state
+[[sinks]]
+name = "orders_current_state_sink"
+stream = "orders"
+topic = "consolidated"
+schema = "json"
+table = "orders_current_state"
+batch_size = 500
+batch_timeout_ms = 500
+
+# 3. Olist Orders -> TiDB olist_orders
+[[sinks]]
+name = "olist_orders_sink"
+stream = "olist"
+topic = "orders_stream"
+schema = "json"
+table = "olist_orders"
+batch_size = 500
+batch_timeout_ms = 500
+
+# 4. Olist Order Items -> TiDB olist_order_items
+[[sinks]]
+name = "olist_order_items_sink"
+stream = "olist"
+topic = "order_items_stream"
+schema = "json"
+table = "olist_order_items"
+batch_size = 500
+batch_timeout_ms = 500
+
+# 5. Olist Order Payments -> TiDB olist_order_payments
+[[sinks]]
+name = "olist_order_payments_sink"
+stream = "olist"
+topic = "order_payments_stream"
+schema = "json"
+table = "olist_order_payments"
+batch_size = 500
+batch_timeout_ms = 500
+
+# 6. Olist Order Reviews -> TiDB olist_order_reviews
+[[sinks]]
+name = "olist_order_reviews_sink"
+stream = "olist"
+topic = "order_reviews_stream"
+schema = "json"
+table = "olist_order_reviews"
+batch_size = 500
+batch_timeout_ms = 500
+
+# 7. HPC-MQBench Benchmark -> TiDB hpc_benchmarks
+[[sinks]]
+name = "hpc_benchmarks_sink"
+stream = "benchmark"
+topic = "hpc_mqbench"
+schema = "json"
+table = "hpc_benchmarks"
+batch_size = 1000
+batch_timeout_ms = 500

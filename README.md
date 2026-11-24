@@ -436,16 +436,17 @@ cargo run --bin setup-iam                         # Idempotent IAM setup
 # Windows PowerShell: .\scripts\setup-topics.ps1; .\scripts\setup-iam.ps1
 ```
 
-### 5. Replay & Load the Full 9-Table Olist Dataset (AD-34, AD-35)
+### 5. Replay & Load the Full 9-Table Olist Dataset into TiDB (AD-34, AD-35, AD-36)
 
 Download the public Kaggle [Brazilian E-Commerce Public Dataset by Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce) (all 9 CSVs) into `docs/datasets/olist/` (or use the bundled `olist_orders_dataset.csv` sample):
 
 ```bash
-# 1. Batch-load the 5 static reference dimensions into Delta Lake (customers, products, sellers, deduplicated geolocation, category translations)
-cargo run --release --bin streaming-admin -- load-olist-dimensions \
-  --input-dir docs/datasets/olist --delta-dir data/delta
+# 1. Initialize TiDB 9-table Olist + CQRS schema and batch-UPSERT the 5 static reference dimensions
+cargo run --release --bin streaming-admin -- init-tidb-schema --tidb-url mysql://root@127.0.0.1:4000/ferrouscx
+cargo run --release --bin streaming-admin -- load-olist-tidb \
+  --input-dir docs/datasets/olist --tidb-url mysql://root@127.0.0.1:4000/ferrouscx
 
-# 2. Stream the 4 transactional fact tables into Apache Iggy -> native delta-sink -> /data/delta/olist_*
+# 2. Stream the 4 transactional fact tables into Apache Iggy -> custom pure-Rust tidb-sink -> TiDB
 # Orders (10x demo pace -> olist/orders_stream):
 cargo run --release --manifest-path ./stream-replay-rs/Cargo.toml -- --config profiles/olist-demo.toml
 # Optional: stream items, payments, and reviews once downloaded into docs/datasets/olist/:
