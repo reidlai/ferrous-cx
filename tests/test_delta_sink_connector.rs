@@ -395,3 +395,52 @@ table_uri = "/data/delta/orders_raw_events"
     let err = parse_and_validate_connector_config(toml_cfg, Some(&delta_dir)).unwrap_err();
     assert!(err.to_string().contains("corrupt/empty commit log (0 bytes)"));
 }
+
+#[test]
+fn test_ad34_olist_orders_base_schema_parity_with_orders_current_state() {
+    let olist = TABLES
+        .iter()
+        .find(|t| t.delta_table_name == "olist_orders")
+        .expect("olist_orders table spec must exist");
+    let current = TABLES
+        .iter()
+        .find(|t| t.delta_table_name == "orders_current_state")
+        .expect("orders_current_state table spec must exist");
+
+    // AD-34: First 8 columns of orders_current_state must match olist_orders verbatim
+    assert_eq!(olist.schema_fields.len(), 8);
+    assert_eq!(current.schema_fields.len(), 14);
+    assert_eq!(
+        &current.schema_fields[..8],
+        olist.schema_fields,
+        "orders_current_state must use the exact 8-column olist_orders base schema (AD-34)"
+    );
+
+    // Verify 6-column CQRS / concession overlay
+    let overlay_names: Vec<&str> = current.schema_fields[8..]
+        .iter()
+        .map(|(name, _, _)| *name)
+        .collect();
+    assert_eq!(
+        overlay_names,
+        vec![
+            "total_amount_cents",
+            "total_freight_cents",
+            "courtesy_credit_cents",
+            "credit_delta",
+            "version",
+            "updated_at"
+        ]
+    );
+
+    // Verify Olist replay profiles route to olist/orders_stream (AD-34)
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for profile in ["profiles/olist-demo.toml", "profiles/olist-load.toml"] {
+        let content = std::fs::read_to_string(manifest_dir.join(profile))
+            .unwrap_or_else(|e| panic!("failed to read {profile}: {e}"));
+        assert!(
+            content.contains("destination = \"olist/orders_stream\""),
+            "{profile} must target olist/orders_stream (AD-34)"
+        );
+    }
+}

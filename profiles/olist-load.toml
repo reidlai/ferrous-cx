@@ -1,7 +1,7 @@
 # ==============================================================================
 # FerrousCX Olist Sustained Load Replay Profile (Story 12.4, NFR-3, SM-3)
 # Sustained fixed-rate throughput at 25 events per second with zero dropped watermarks
-# Targets native Apache Iggy HTTP API on 127.0.0.1:3000 (orders/intake)
+# Targets native Apache Iggy HTTP API on 127.0.0.1:3000 (olist/orders_stream, AD-34)
 # ==============================================================================
 
 [dataset]
@@ -27,4 +27,4 @@ loop_id_salt = true
 [sink]
 default_type = "iggy"
 default_url = "http://127.0.0.1:3000"
-destination = "orders/intake"
+destination = "olist/orders_stream"

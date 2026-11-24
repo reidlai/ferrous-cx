@@ -153,11 +153,20 @@ pub const TABLES: &[TableInitSpec] = &[
         delta_table_name: "orders_current_state",
         consumer_group: "cg-arroyo-state",
         schema_fields: &[
+            // Canonical 8-column olist_orders base (AD-34)
             ("order_id", "string", false),
             ("customer_id", "string", false),
-            ("status", "string", false),
+            ("order_status", "string", false),
+            ("order_purchase_timestamp", "timestamp", false),
+            ("order_approved_at", "timestamp", true),
+            ("order_delivered_carrier_date", "timestamp", true),
+            ("order_delivered_customer_date", "timestamp", true),
+            ("order_estimated_delivery_date", "timestamp", false),
+            // 6-column CQRS / concession overlay (AD-34)
             ("total_amount_cents", "long", false),
-            ("item_count", "integer", false),
+            ("total_freight_cents", "long", false),
+            ("courtesy_credit_cents", "long", false),
+            ("credit_delta", "long", false),
             ("version", "long", false),
             ("updated_at", "timestamp", false),
         ],
