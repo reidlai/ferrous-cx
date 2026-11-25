@@ -485,38 +485,48 @@ ferrous-cx/ (This Repository - Core Public Repository: demo config, runtime stac
 
 ### Runtime Topology
 
-| Component              | Container Service      |               Primary Ports                | Healthcheck Probe                 | Day-0 Hardened |
-| :--------------------- | :--------------------- | :----------------------------------------: | :-------------------------------- | :------------: |
-| `ferrous-iam`          | `kanidmd`              |       `8443` (HTTPS), `3636` (LDAPS)       | `/sbin/kanidmd version`           |   Read-only    |
-| `ferrous-cx`           | `ferrous-iggy-broker`  |        `3000` (HTTP), `8090` (TCP)         | Iggy ping HTTP 200                |      Yes       |
-| `ferrous-cx`           | `ferrous-sierradb`     |               `9090` (RESP3)               | TCP port 9090 probe               |      Yes       |
-| `ferrous-vectordb`     | `ferrous-vectordb`     |        `6333` (HTTP), `6334` (gRPC)        | `GET /readyz` HTTP 200            |      Yes       |
-| `ferrous-cqrses`       | `order-projection`     |                  Internal                  | `/order_projection --healthcheck` |      Yes       |
-| `ferrous-cqrses`       | `order-saga`           |                  Internal                  | `/order_saga --healthcheck`       |      Yes       |
-| `ferrous-api`          | `ferrous-api`          |               `8080` (HTTP)                | `GET /health` HTTP 200            |      Yes       |
-| `ferrous-agent`        | `ferrous-agent`        |               `8081` (HTTP)                | `GET /health` HTTP 200            |      Yes       |
-| `ferrous-frontend`     | `ferrous-frontend`     |               `5173` (HTTP)                | `GET /health` HTTP 200            |      Yes       |
-| `ferrous-reverseproxy` | `ferrous-reverseproxy` |         `80` (HTTP), `443` (HTTPS)         | TCP port 80 check                 |      Yes       |
-| `ferrous-cx`           | `jaeger` (ephemeral)   | `16686` (UI), `4317` (gRPC), `4318` (HTTP) | `GET /` HTTP 200                  |      Yes       |
+| Component              | Container Service      |               Primary Ports                | Healthcheck Probe                      | Day-0 Hardened |
+| :--------------------- | :--------------------- | :----------------------------------------: | :------------------------------------- | :------------: |
+| `ferrous-iam`          | `ferrous-iam`          |       `8443` (HTTPS), `3636` (LDAPS)       | `/sbin/kanidmd version`                |   Read-only    |
+| `ferrous-cx`           | `ferrous-iggy-broker`  |        `3000` (HTTP), `8090` (TCP)         | `GET /ping` HTTP 200                   |      Yes       |
+| `ferrous-cx`           | `ferrous-tidb`         |       `4000` (MySQL), `10080` (HTTP)       | `GET /status` HTTP 200                 |   Container    |
+| `ferrous-cx`           | `ferrous-tidb-sink`    |               `8095` (HTTP)                | `/tidb_sink --healthcheck`             |  `scratch` RO  |
+| `ferrous-cx`           | `ferrous-sierradb`     |               `9090` (RESP3)               | TCP port 9090 probe                    |      Yes       |
+| `ferrous-vectordb`     | `ferrous-vectordb`     |        `6333` (HTTP), `6334` (gRPC)        | `GET /readyz` HTTP 200                 |      Yes       |
+| `ferrous-cqrses`       | `order-projection`     |                  Internal                  | `/order_projection --healthcheck`      |  `scratch` RO  |
+| `ferrous-cqrses`       | `order-saga`           |                  Internal                  | `/order_saga --healthcheck`            |  `scratch` RO  |
+| `ferrous-api`          | `ferrous-api`          |               `8080` (HTTP)                | `GET /health/ready` HTTP 200           |  `scratch` RO  |
+| `ferrous-agent`        | `ferrous-agent`        |               `8081` (HTTP)                | `GET /health` HTTP 200                 |      Yes       |
+| `ferrous-frontend`     | `ferrous-frontend`     |               `5173` (HTTP)                | `GET /health` HTTP 200                 |  `scratch` RO  |
+| `ferrous-reverseproxy` | `ferrous-reverseproxy` |         `80` (HTTP), `443` (HTTPS)         | TCP port 80 check                      |      Yes       |
+| `ferrous-cx`           | `jaeger` (ephemeral)   | `16686` (UI), `4317` (gRPC), `4318` (HTTP) | `GET /` HTTP 200                       |      Yes       |
 
 ---
 
-## 🛠️ Developer Quickstart
+## 🛠️ Developer Quick Start Guide
+
+Run all commands from the `ferrous-cx` checkout root (where `docker-compose.yml` lives).
 
 ### Prerequisites
 
-- **Docker & Docker Compose:** v2.29+
-- **PowerShell 7+** (Windows) or **Bash** (macOS/Linux)
-- **Rust 1.80+** (required for `setup-topics`, `setup-iam`, and `stream-replay-rs`)
+| Tool | Version | Used For |
+| :--- | :--- | :--- |
+| **Docker & Docker Compose** | `v2.29+` | Building and orchestrating the unified 13-container stack |
+| **Rust / Cargo** | `1.80+` | Running `streaming-admin`, `setup-iam`, and `stream-replay-rs` |
+| **Shell** | **Bash** (macOS/Linux) or **PowerShell 7+** / Git Bash (Windows) | Running helper scripts and `curl` / `curl.exe` verification |
 
-### 1. Clone the Public Repository
+### Step 1. Clone the Repository & Submodules
 
 ```bash
 git clone --recurse-submodules https://github.com/reidlai/ferrous-cx.git
 cd ferrous-cx
 ```
 
-### 2. Configure Environment & Generate Dev TLS Certificates
+*(If already cloned without `--recurse-submodules`, run `git submodule update --init --recursive`.)*
+
+### Step 2. Configure Environment & Generate Dev TLS Certificates
+
+Copy the example env files and generate self-signed Dev TLS certificates (`config/iam/certs/{chain,key}.pem`) in pure Rust via `rcgen` (no host `openssl` CLI required):
 
 ```bash
 cp .env.example .env
@@ -526,69 +536,108 @@ cp docker/.env.example docker/.env
 cargo run --bin setup-iam -- --generate-certs
 ```
 
-### 3. Launch the Unified Runtime Stack
+> [!IMPORTANT]
+> Keep `.env` and `docker/.env` untracked. Set `IGGY_HTTP_JWT_ENCODING_SECRET` and `IGGY_HTTP_JWT_DECODING_SECRET` to the same random secret in `.env` so `iggy-broker` and `streaming-admin` share the HS256 signing key.
+
+### Step 3. Launch the Unified Runtime Stack
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 docker compose ps
 ```
 
-### 4. Provision Apache Iggy Topics, TiDB Schema, & IAM Personas
+Wait until core services report **`(healthy)`**:
 
-The automated Cargo provisioners idempotently initialize all streams, topics, consumer groups, TiDB 9-table Olist + CQRS DDL, and IAM personas:
+| Service | Local Endpoint | Role |
+| :--- | :--- | :--- |
+| **Perimeter Reverse Proxy** | `https://localhost:443/` (or `http://localhost:80/`) | Zentinel / Pingora Edge Proxy & WAF |
+| **Operator Studio UI** | `http://localhost:5173/` | Svelte 5 Workbench & Read-Only Replay Monitor |
+| **Ferrous API Gateway** | `http://localhost:8080/healthz` | Axum REST + SSE + `TiDbOrderQueryEngine` + `/mcp` |
+| **TiDB HTAP Database** | `localhost:4000` (MySQL), `http://localhost:10080/status` | 9 Kaggle Olist Tables + CQRS `orders_current_state` |
+| **Custom TiDB Sink** | `http://localhost:8095/health`, `/stats` | Pure-Rust `FROM scratch` Apache Iggy → TiDB Sink |
+| **Apache Iggy Broker** | `http://localhost:3000/ping`, `localhost:8090` (TCP) | High-Throughput Event Streaming & WAL |
+| **SierraDB Event Store** | `localhost:9090` (RESP3) | Pure-Rust Event Store (`EAPPEND` / `ESCAN` / `ESVER`) |
+| **Kanidm (IAM)** | `https://localhost:8443` (self-signed), LDAPS `3636` | Pure-Rust Identity Provider (OIDC / OAuth2) |
+| **Qdrant Vector DB** | `http://localhost:6333/readyz` | Vector Store for SOPs & Support Transcripts |
+| **Jaeger Tracing UI** | `http://localhost:16686/` | OpenTelemetry Distributed Traces |
+
+### Step 4. Provision Apache Iggy Topics, TiDB Schema, & IAM Personas
+
+All provisioners are pure Rust, cross-platform, and idempotent (supporting `--dry-run`):
 
 ```bash
-# Cross-Platform Unified Administration Suite (Cargo)
+# 1. Provision Apache Iggy streams & topics (olist/*_stream, orders/*, benchmark/hpc_mqbench)
 cargo run --bin streaming-admin -- provision-topics --url http://127.0.0.1:3000
+
+# 2. Initialize TiDB database & all 9 Olist tables + CQRS/benchmark tables
 cargo run --bin streaming-admin -- init-tidb-schema --tidb-url mysql://root@127.0.0.1:4000/ferrouscx
 
-cargo run --bin setup-iam -- --dry-run             # IAM persona & M2M audit
-cargo run --bin setup-iam                          # Idempotent IAM setup
+# 3. Audit and provision Kanidm IAM personas & M2M service accounts
+cargo run --bin setup-iam -- --dry-run
+cargo run --bin setup-iam
 
 # Optional shell wrappers:
 # Linux/macOS:        ./scripts/setup-topics.sh && ./scripts/setup-iam.sh
 # Windows PowerShell: .\scripts\setup-topics.ps1; .\scripts\setup-iam.ps1
 ```
 
-### 5. Replay & Load the Full 9-Table Olist Dataset into TiDB (AD-34, AD-35, AD-36)
+### Step 5. Load & Stream the 9-Table Kaggle Olist Dataset into TiDB
 
-Download the public Kaggle [Brazilian E-Commerce Public Dataset by Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce) (all 9 CSVs) into `docs/datasets/olist/` (or use the bundled `olist_orders_dataset.csv` sample):
+Download the public Kaggle [Brazilian E-Commerce Public Dataset by Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce) (all 9 CSVs) into `docs/datasets/olist/`, or start immediately with the bundled 20-order sample `docs/datasets/olist/olist_orders_dataset.csv`:
 
 ```bash
-# 1. Initialize TiDB 9-table Olist + CQRS schema and batch-UPSERT the 5 static reference dimensions
-cargo run --release --bin streaming-admin -- init-tidb-schema --tidb-url mysql://root@127.0.0.1:4000/ferrouscx
+# Optional: quick zero-broker smoke test against the bundled sample CSV
+cargo run --release --manifest-path ./stream-replay-rs/Cargo.toml -- \
+  --input-file-path docs/datasets/olist/olist_orders_dataset.csv \
+  --sink stdout --speed max --no-loop --progress
+
+# 1. Batch-UPSERT the 5 static reference dimensions into TiDB
+#    (olist_customers, olist_products, olist_sellers, olist_geolocation, olist_category_translation)
 cargo run --release --bin streaming-admin -- load-olist-tidb \
   --input-dir docs/datasets/olist --tidb-url mysql://root@127.0.0.1:4000/ferrouscx
 
-# 2. Stream the 4 transactional fact tables into Apache Iggy -> custom pure-Rust tidb-sink -> TiDB
-# Orders (10x demo pace -> olist/orders_stream):
+# 2. Stream the 4 transactional fact tables via stream-replay-rs -> Apache Iggy -> tidb-sink -> TiDB
+#    Orders (10x demo pace -> olist/orders_stream; use --speed max --no-loop for an instant load):
 cargo run --release --manifest-path ./stream-replay-rs/Cargo.toml -- --config profiles/olist-demo.toml
-# Optional: stream items, payments, and reviews once downloaded into docs/datasets/olist/:
+
+#    Items, Payments, & Reviews (once downloaded into docs/datasets/olist/):
 cargo run --release --manifest-path ./stream-replay-rs/Cargo.toml -- --config profiles/olist-items.toml
 cargo run --release --manifest-path ./stream-replay-rs/Cargo.toml -- --config profiles/olist-payments.toml
 cargo run --release --manifest-path ./stream-replay-rs/Cargo.toml -- --config profiles/olist-reviews.toml
-# Or from a sibling monorepo workspace:
-cargo run --release --manifest-path ../stream-replay-rs/Cargo.toml -- --config profiles/olist-demo.toml
-
-# Option B: Run installed binary
-stream-replay-rs --config profiles/olist-demo.toml
 ```
 
-### 6. Inspect Services & Observability
+*(If running from a sibling monorepo checkout, use `--manifest-path ../stream-replay-rs/Cargo.toml`, or install the CLI once via `cargo install --git https://github.com/reidlai/stream-replay-rs` and run `stream-replay-rs --config profiles/olist-demo.toml`.)*
 
-- **Perimeter Reverse Proxy:** `https://localhost:443/` (or `http://localhost:80/`)
-- **Direct Frontend UI:** `http://localhost:5173/` (Operator Studio, strictly read-only)
-- **Distributed Traces (Jaeger):** `http://localhost:16686/`
-- **End-to-End Smoke Test:**
-  ```bash
-  powershell -ExecutionPolicy Bypass -File scripts/smoke-test.ps1
-  # or: bash scripts/smoke-test.sh
-  ```
-- **Vulnerability Audit:**
-  ```bash
-  powershell -ExecutionPolicy Bypass -File scripts/scan-vulnerabilities.ps1
-  # or: bash scripts/scan-vulnerabilities.sh
-  ```
+### Step 6. Verify Live TiDB Ingestion, API, & Operator Studio UI
+
+```bash
+# 1. Core service health
+curl -sf http://localhost:3000/ping            # Apache Iggy: "pong"
+curl -sf http://localhost:10080/status         # TiDB status JSON
+curl -sf http://localhost:8095/stats           # tidb-sink UPSERT counters
+curl -sf http://localhost:8080/healthz         # ferrous-api: "healthy"
+
+# 2. Live 9-table Kaggle Olist + CQRS TiDB row counts
+curl -sf http://localhost:8080/api/v1/olist/tables | python3 -m json.tool
+
+# 3. Query live replayed Olist orders from TiDB
+curl -sf "http://localhost:8080/api/v1/orders?limit=5" | python3 -m json.tool
+
+# 4. Full platform smoke test & vulnerability audit
+bash scripts/smoke-test.sh                     # Windows: powershell -ExecutionPolicy Bypass -File scripts/smoke-test.ps1
+bash scripts/scan-vulnerabilities.sh           # Windows: powershell -ExecutionPolicy Bypass -File scripts/scan-vulnerabilities.ps1
+```
+
+Open **`http://localhost:5173/`** in your browser to explore:
+- **Investigation Workbench:** Click **Sync TiDB** to load live orders from `GET /api/v1/orders` with the 5-milestone Olist delivery timeline, itemized seller/freight/EN-category breakdown, payment legs (`olist_order_payments`), and customer reviews (`olist_order_reviews`).
+- **Olist Stream & TiDB Monitor (`/simulator`):** Read-only telemetry for all 4 streamed Apache Iggy topics, `tidb-sink` consumer lag, and all 9 Kaggle Olist TiDB tables + `orders_current_state`.
+
+### Step 7. Stop & Reset
+
+```bash
+docker compose down            # Stop containers, preserve persisted volumes
+docker compose down -v         # Stop containers and wipe named volumes (iggy_data, sierradb_data, tidb_data)
+```
 
 ---
 
@@ -609,120 +658,4 @@ stream-replay-rs --config profiles/olist-demo.toml
 git clone --recurse-submodules https://github.com/reidlai/ferrouscx-bmad.git
 cd ferrouscx-bmad
 git submodule update --init --recursive
-```
-
----
-
-## 🚀 Local Demo Stack: Provision Services & Run `stream-replay-rs`
-
-This walk-through is carried over from the former `ferrous-docker` README and adapted to the consolidated platform. It describes how to bring the stack up and drive it with the `stream-replay-rs` CLI for a local demo or manual testing. `docker-compose.yml` lives at the `ferrous-cx` checkout root; run every command from there.
-
-### Prerequisites
-
-| Tool             | Version  | Used for                                                                   |
-| :--------------- | :------- | :------------------------------------------------------------------------- |
-| Docker + Compose | `v2.29+` | Building images and running the stack                                      |
-| Rust             | `1.80+`  | Building `streaming-admin`, `setup-iam`, and installing `stream-replay-rs` |
-
-Make sure the submodules are checked out (`git submodule update --init --recursive`).
-
-> [!IMPORTANT]
-> **Shells.** On macOS / Linux use the `bash` blocks as written. On Windows use **Git Bash** for the `bash` blocks, or **PowerShell** for the `powershell` blocks. `cmd.exe` can only run `.bat` launchers, not the Bash or PowerShell blocks.
-
-### 1. Build the Local Images
-
-The compose file references images that can be built locally or pulled from registries:
-
-```bash
-docker build -t ferrous-iam:latest ferrous-iam
-docker build -t ferrous-streaming-iggy:latest -f docker/Dockerfile.iggy .
-```
-
-### 2. Generate Dev TLS Certificates
-
-Kanidm requires valid TLS certificates to boot. Generate self-signed development certificates with required SANs (`localhost`, `ferrous-iam`, `ferrouscx.local`, `127.0.0.1`, `::1`) in pure Rust using `rcgen` (zero host `openssl` CLI or Python dependencies):
-
-```bash
-# Cross-Platform (Cargo)
-cargo run --bin setup-iam -- --generate-certs
-
-# Force overwrite existing certificates if needed:
-cargo run --bin setup-iam -- --generate-certs --force
-
-# Optional shell wrappers:
-# Linux/macOS:        ./scripts/setup-iam.sh --generate-certs
-# Windows PowerShell: .\scripts\setup-iam.ps1 -GenerateCerts
-```
-
-Certificates are generated directly into `config/iam/certs/` (`chain.pem` and `key.pem`), where Docker Compose automatically mounts them into the Kanidm container.
-
-### 3. Create `.env`
-
-Iggy signs its admin JWTs with a shared secret that defaults to **empty** when unset, and the provisioning scripts in step 5 must use the same secret as the broker. Generate a random secret and set `IGGY_HTTP_JWT_ENCODING_SECRET` and `IGGY_HTTP_JWT_DECODING_SECRET` to the same value (HS256 requires identical secrets). `.env` holds secrets, so keep it out of Git. The data platform authenticates with Iggy's native credentials, not Kanidm.
-
-### 4. Start the Stack
-
-```bash
-docker compose up -d
-docker compose ps        # wait until ferrous-iam, iggy-broker, sierradb, and vectordb report "healthy"
-```
-
-| Service                | Endpoint                                                  | Protocol / Role                                           |
-| :--------------------- | :-------------------------------------------------------- | :-------------------------------------------------------- |
-| Kanidm (IAM)           | `https://localhost:8443` (self-signed cert), LDAPS `3636` | Pure-Rust Identity Provider                               |
-| Apache Iggy HTTP       | `http://localhost:3000/ping`                              | Broker HTTP Management & Health                           |
-| Apache Iggy native TCP | `localhost:8090`                                          | High-Throughput Streaming & WAL                           |
-| SierraDB Event Store   | `localhost:9090`                                          | Pure-Rust RESP3 Event Store (`EAPPEND`, `ESCAN`, `ESVER`) |
-| TiDB Transactional DB  | `localhost:4000` (MySQL), `http://localhost:10080/status` | TiDB HTAP SQL (`olist_*`, `orders_current_state`, AD-36)  |
-| Custom TiDB Sink       | `http://localhost:8095/health`                            | Pure-Rust `FROM scratch` Iggy → TiDB Sink (`tidb-sink`)   |
-| Qdrant Vector DB       | `http://localhost:6333/readyz`                            | Vector DB for SOPs & Transcripts                          |
-| Ferrous API Gateway    | `http://localhost:8080/health`                            | Axum API + SSE + `TiDbOrderQueryEngine` + `/mcp`          |
-| Frontend UI            | `http://localhost:5173/`                                  | Svelte 5 Operator Studio (read-only)                      |
-
-### 5. Provision Topics, TiDB Schema, & IAM Personas
-
-`ferrous-cx` owns the platform streaming administration, TiDB 9-table Olist DDL, and IAM persona configurations. Use the native cross-platform Cargo tools to audit and idempotently provision the entire platform:
-
-```bash
-# Cross-Platform (Cargo)
-cargo run --bin streaming-admin -- provision-topics --url http://127.0.0.1:3000
-cargo run --bin streaming-admin -- init-tidb-schema --tidb-url mysql://root@127.0.0.1:4000/ferrouscx
-
-cargo run --bin setup-iam -- --dry-run             # IAM persona & M2M audit
-cargo run --bin setup-iam                          # Idempotent IAM setup
-
-# Optional shell wrappers:
-# Linux/macOS:        ./scripts/setup-topics.sh && ./scripts/setup-iam.sh
-# Windows PowerShell: .\scripts\setup-topics.ps1; .\scripts\setup-iam.ps1
-```
-
-Both tools support `--dry-run` for non-destructive pre-flight auditing. They connect directly to running container ports (`http://localhost:3000` for Iggy, `https://localhost:8443` for Kanidm) and are fully idempotent.
-
-### 6. Run `stream-replay-rs`
-
-```bash
-cargo install stream-replay-rs   # or: cargo install --git https://github.com/reidlai/stream-replay-rs
-
-# Smoke test with no broker involved
-stream-replay-rs --input-file-path data/olist_orders.parquet --sink stdout --speed 10x --progress
-
-# Point at Apache Iggy stream ingestion from the stack (demo profile: 10x)
-stream-replay-rs --config profiles/olist-demo.toml
-```
-
-Looping, fixed-rate and timestamp options are in the [`stream-replay-rs` README](https://github.com/reidlai/stream-replay-rs). For the load profile, replace `--speed 10x` with `--rate 25 --loop --advance-loop-timestamps --loop-id-salt`.
-
-### 7. Check the Stack
-
-```bash
-curl http://localhost:3000/ping            # Iggy: "pong"  (PowerShell: use curl.exe)
-curl http://localhost:8080/health         # API Service health
-```
-
-### 8. Stop and Reset
-
-```bash
-docker compose down            # stop, keep data
-docker compose down -v         # also delete the named volumes
-# Persistent state lives in named volumes iggy_data, sierradb_data, and tidb_data
 ```
