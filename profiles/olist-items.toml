@@ -11,7 +11,7 @@ timestamp_unit = "rfc3339"
 partition_key = "order_id"
 
 [replay]
-speed = 100.0
+speed = "max"
 event_time = "compress"
 loop = false
 

@@ -587,7 +587,7 @@ Download the public Kaggle [Brazilian E-Commerce Public Dataset by Olist](https:
 
 ```bash
 # Optional: quick zero-broker smoke test against the bundled sample CSV
-cargo run --release --manifest-path ./stream-replay-rs/Cargo.toml -- \
+cargo run --release --manifest-path ../stream-replay-rs/Cargo.toml -- \
   --input-file-path docs/datasets/olist/olist_orders_dataset.csv \
   --sink stdout --speed max --no-loop --progress
 
@@ -597,16 +597,16 @@ cargo run --release --bin streaming-admin -- load-olist-tidb \
   --input-dir docs/datasets/olist --tidb-url mysql://root@127.0.0.1:4000/ferrouscx
 
 # 2. Stream the 4 transactional fact tables via stream-replay-rs -> Apache Iggy -> tidb-sink -> TiDB
-#    Orders (10x demo pace -> olist/orders_stream; use --speed max --no-loop for an instant load):
-cargo run --release --manifest-path ./stream-replay-rs/Cargo.toml -- --config profiles/olist-demo.toml
+#    Orders (10x demo pace -> olist/orders_stream; append `--speed max --no-loop` for an instant bulk load):
+cargo run --release --manifest-path ../stream-replay-rs/Cargo.toml -- --config profiles/olist-demo.toml
 
-#    Items, Payments, & Reviews (once downloaded into docs/datasets/olist/):
-cargo run --release --manifest-path ./stream-replay-rs/Cargo.toml -- --config profiles/olist-items.toml
-cargo run --release --manifest-path ./stream-replay-rs/Cargo.toml -- --config profiles/olist-payments.toml
-cargo run --release --manifest-path ./stream-replay-rs/Cargo.toml -- --config profiles/olist-reviews.toml
+#    Items, Payments, & Reviews (unthrottled `--speed max`, once downloaded into docs/datasets/olist/):
+cargo run --release --manifest-path ../stream-replay-rs/Cargo.toml -- --config profiles/olist-items.toml --speed max
+cargo run --release --manifest-path ../stream-replay-rs/Cargo.toml -- --config profiles/olist-payments.toml --speed max
+cargo run --release --manifest-path ../stream-replay-rs/Cargo.toml -- --config profiles/olist-reviews.toml --speed max
 ```
 
-*(If running from a sibling monorepo checkout, use `--manifest-path ../stream-replay-rs/Cargo.toml`, or install the CLI once via `cargo install --git https://github.com/reidlai/stream-replay-rs` and run `stream-replay-rs --config profiles/olist-demo.toml`.)*
+*(Note: Use `--manifest-path ../stream-replay-rs/Cargo.toml` inside the `ferrouscx-bmad` monorepo workspace, or `--manifest-path ./stream-replay-rs/Cargo.toml` in a standalone `ferrous-cx` clone with submodules initialized. Alternatively, install the CLI once via `cargo install --git https://github.com/reidlai/stream-replay-rs` and run `stream-replay-rs --config profiles/olist-demo.toml` directly.)*
 
 ### Step 6. Verify Live TiDB Ingestion, API, & Operator Studio UI
 
