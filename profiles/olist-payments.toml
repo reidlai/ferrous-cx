@@ -9,7 +9,7 @@ format = "csv"
 partition_key = "order_id"
 
 [replay]
-rate = 500
+speed = "max"
 loop = false
 
 [sink]
