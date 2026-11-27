@@ -598,12 +598,12 @@ cargo run --release --bin streaming-admin -- load-olist-tidb \
 
 # 2. Stream the 4 transactional fact tables via stream-replay-rs -> Apache Iggy -> tidb-sink -> TiDB
 #    Orders (10x demo pace -> olist/orders_stream; append `--speed max --no-loop` for an instant bulk load):
-cargo run --release --manifest-path ../stream-replay-rs/Cargo.toml -- --config profiles/olist-demo.toml
+cargo run --release --manifest-path ../stream-replay-rs/Cargo.toml -- --config profiles/olist-demo.toml --speed max --no-loop
 
 #    Items, Payments, & Reviews (unthrottled `--speed max`, once downloaded into docs/datasets/olist/):
-cargo run --release --manifest-path ../stream-replay-rs/Cargo.toml -- --config profiles/olist-items.toml --speed max
-cargo run --release --manifest-path ../stream-replay-rs/Cargo.toml -- --config profiles/olist-payments.toml --speed max
-cargo run --release --manifest-path ../stream-replay-rs/Cargo.toml -- --config profiles/olist-reviews.toml --speed max
+cargo run --release --manifest-path ../stream-replay-rs/Cargo.toml -- --config profiles/olist-items.toml --speed max --no-loop
+cargo run --release --manifest-path ../stream-replay-rs/Cargo.toml -- --config profiles/olist-payments.toml --speed max --no-loop
+cargo run --release --manifest-path ../stream-replay-rs/Cargo.toml -- --config profiles/olist-reviews.toml --speed max --no-loop
 ```
 
 *(Note: Use `--manifest-path ../stream-replay-rs/Cargo.toml` inside the `ferrouscx-bmad` monorepo workspace, or `--manifest-path ./stream-replay-rs/Cargo.toml` in a standalone `ferrous-cx` clone with submodules initialized. Alternatively, install the CLI once via `cargo install --git https://github.com/reidlai/stream-replay-rs` and run `stream-replay-rs --config profiles/olist-demo.toml` directly.)*
