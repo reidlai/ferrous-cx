@@ -1,3 +1,12 @@
 /target
 **/*.rs.bk
 *.pdb
+docs/datasets/olist/olist_customers_dataset.csv
+docs/datasets/olist/olist_geolocation_dataset.csv
+docs/datasets/olist/olist_order_items_dataset.csv
+docs/datasets/olist/olist_order_payments_dataset.csv
+docs/datasets/olist/olist_order_reviews_dataset.csv
+docs/datasets/olist/olist_orders_dataset.csv
+docs/datasets/olist/olist_products_dataset.csv
+docs/datasets/olist/olist_sellers_dataset.csv
+docs/datasets/olist/product_category_name_translation.csv
