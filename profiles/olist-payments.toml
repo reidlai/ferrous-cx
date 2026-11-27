@@ -6,10 +6,12 @@
 [dataset]
 input_path = "docs/datasets/olist/olist_order_payments_dataset.csv"
 format = "csv"
+timestamp_column = "payment_sequential"
 partition_key = "order_id"
 
 [replay]
 speed = "max"
+shift_timestamps = false
 loop = false
 
 [sink]
